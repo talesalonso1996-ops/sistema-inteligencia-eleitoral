@@ -40,11 +40,18 @@ _COLUNAS_ALFABETIZACAO_ALFABETIZADOS = [
 
 
 def _ler_zip_csv(caminho: str, colunas: list[str], dtype: dict) -> pd.DataFrame:
-    """Le o CSV (dentro do zip original do IBGE) apenas com as colunas de
-    interesse. Le tudo como string (dtype=str em todas as colunas evita um
-    bug conhecido do parser C do pandas ao combinar usecols+dtype parcial)
-    e a conversao numerica fica a cargo de `_to_numeric`."""
+    """Le os dados do IBGE apenas com as colunas de interesse - do CSV
+    original (dentro do zip) ou do pacote reduzido em Parquet (ver
+    scripts/preparar_dados_cloud.py), ja pre-filtrado para SP. Le tudo como
+    string (dtype=str evita um bug conhecido do parser C do pandas ao
+    combinar usecols+dtype parcial) e a conversao numerica fica a cargo de
+    `_to_numeric`."""
     path = caminho if (len(caminho) > 1 and caminho[1] == ":") else str(resolve_path(caminho))
+    if path.lower().endswith(".parquet"):
+        # O parquet ja foi escrito a partir de um dataframe dtype=str
+        # (ver scripts/preparar_dados_cloud.py), entao os nulos ja vem
+        # como NaN reais, nao a string "nan".
+        return pd.read_parquet(path, columns=colunas)
     return pd.read_csv(path, sep=";", usecols=colunas, dtype=str, encoding="latin-1")
 
 

@@ -2,45 +2,44 @@
 # Cada entrada registra origem, ano, arquivo local esperado e metodologia,
 # conforme exigido no diagnostico (secao 3 e 4 do briefing): nenhuma variavel
 # pode ser usada sem origem, arquivo, ano e metodologia documentados.
+#
+# `arquivo_local` aponta para o PACOTE REDUZIDO (Parquet/GeoParquet, apenas
+# colunas usadas, filtrado para SP quando a fonte original e nacional) -
+# gerado por scripts/preparar_dados_cloud.py a partir dos arquivos oficiais
+# completos (`arquivo_zip_original`/`url_padrao`). Mesma informacao oficial,
+# so mais leve - necessario para caber no ambiente de deploy em nuvem
+# (Streamlit Community Cloud, RAM/disco limitados). O pacote reduzido e
+# baixado automaticamente pelo app quando ausente (ver
+# src/cloud_data_bootstrap.py).
 
 tse:
   consulta_candidatos:
     descricao: "Registro oficial de candidaturas: partido, coligacao/federacao, situacao da candidatura, resultado final por turno - SP"
     fonte: "TSE - Consulta de candidatos (dadosabertos.tse.jus.br)"
     ano: 2024
-    arquivo_local: "data/raw/consulta_cand_2024_SP.csv"
-    separador: ";"
-    encoding: "latin-1"
+    arquivo_local: "data/raw/consulta_cand_2024_SP.parquet"
     url_padrao: "https://cdn.tse.jus.br/estatistica/sead/odsele/consulta_cand/consulta_cand_2024.zip"
 
   votacao_secao:
     descricao: "Votacao por secao eleitoral - Eleicoes Municipais 2024 - SP"
     fonte: "TSE - Repositorio de dados eleitorais (dadosabertos.tse.jus.br)"
     ano: 2024
-    arquivo_local: "C:/Users/Tales/Downloads/votacao_secao_2024_SP/votacao_secao_2024_SP.csv"
-    separador: ";"
-    encoding: "latin-1"
+    arquivo_local: "data/raw/votacao_secao_2024_SP.parquet"
     url_padrao: "https://cdn.tse.jus.br/estatistica/sead/odsele/votacao_secao/votacao_secao_2024_{uf}.zip"
 
   eleitorado_local_votacao:
-    descricao: "Local de votacao com endereco e coordenadas - Brasil inteiro"
+    descricao: "Local de votacao com endereco e coordenadas - filtrado para SP"
     fonte: "TSE - Eleitorado por local de votacao (dadosabertos.tse.jus.br)"
     ano: 2024
-    arquivo_zip_original: "C:/Users/Tales/Downloads/eleitorado_local_votacao_2024.zip"
-    arquivo_local: "data/raw/eleitorado_local_votacao_2024.csv"
-    separador: ";"
-    encoding: "latin-1"
+    arquivo_local: "data/raw/eleitorado_local_votacao_SP.parquet"
     url_padrao: "https://cdn.tse.jus.br/estatistica/sead/odsele/eleitorado_locais_votacao/eleitorado_local_votacao_2024.zip"
-    observacao: "NR_LATITUDE/NR_LONGITUDE em texto (ex. '-11.5164129'); ja no formato correto neste arquivo (diferente do recorte Santos, ver eleitorado_local_votacao_santos_legado)."
+    observacao: "Arquivo original e nacional; reduzido aqui para SG_UF='SP'. NR_LATITUDE/NR_LONGITUDE ja no formato correto (diferente do recorte Santos legado, ver eleitorado_local_votacao_santos_legado)."
 
   detalhe_votacao_secao_sp:
     descricao: "Comparecimento, abstencao, votos brancos/nulos/legenda por secao - SP"
     fonte: "TSE - Detalhe da votacao por secao (dadosabertos.tse.jus.br)"
     ano: 2024
-    arquivo_zip_original: "C:/Users/Tales/Downloads/detalhe_votacao_secao_2024.zip"
-    arquivo_local: "data/raw/detalhe_votacao_secao_2024_SP.csv"
-    separador: ";"
-    encoding: "latin-1"
+    arquivo_local: "data/raw/detalhe_votacao_secao_2024_SP.parquet"
     url_padrao: "https://cdn.tse.jus.br/estatistica/sead/odsele/detalhe_votacao_secao/detalhe_votacao_secao_2024.zip"
 
   eleitorado_local_votacao_santos_legado:
@@ -50,7 +49,7 @@ tse:
     arquivo_local: "C:/Users/Tales/Downloads/DADOS_SANTOS_ELEITORAL.csv"
     separador: ";"
     encoding: "latin-1"
-    observacao: "NR_LATITUDE/NR_LONGITUDE e NR_TELEFONE_LOCAL exportados com formatacao numerica corrompida pelo Excel (virgula decimal virou separador de milhar). Corrigidos em data_cleaning.py. Preferir eleitorado_local_votacao (nacional, sem corrupcao) quando disponivel."
+    observacao: "NR_LATITUDE/NR_LONGITUDE e NR_TELEFONE_LOCAL exportados com formatacao numerica corrompida pelo Excel (virgula decimal virou separador de milhar). Corrigidos em data_cleaning.py. Preferir eleitorado_local_votacao (nacional, sem corrupcao) quando disponivel. Nao usado em producao/nuvem."
 
   bairros_secao_zona_santos:
     descricao: "Correspondencia bairro x zona x secao eleitoral - Santos/SP (fonte auxiliar, apenas Santos)"
@@ -63,37 +62,43 @@ ibge:
     descricao: "Malha de setores censitarios - SP - Censo 2022"
     fonte: "IBGE - Malhas territoriais CD2022"
     ano: 2022
-    arquivo_local: "C:/Users/Tales/Downloads/SP_setores_CD2022.gpkg"
+    arquivo_local: "data/raw/SP_setores_CD2022.parquet"
+    arquivo_zip_original: "C:/Users/Tales/Downloads/SP_setores_CD2022.gpkg"
 
   bairros_sp:
     descricao: "Malha de bairros - SP - CD2022"
     fonte: "IBGE - Malhas territoriais CD2022"
     ano: 2022
-    arquivo_local: "C:/Users/Tales/Downloads/SP_bairros_CD2022.gpkg"
+    arquivo_local: "data/raw/SP_bairros_CD2022.parquet"
+    arquivo_zip_original: "C:/Users/Tales/Downloads/SP_bairros_CD2022.gpkg"
 
   agregados_demografia:
-    descricao: "Agregados por setor censitario - demografia (sexo, idade)"
+    descricao: "Agregados por setor censitario - demografia (sexo, idade) - filtrado para SP"
     fonte: "IBGE - Censo Demografico 2022 - Agregados por Setores Censitarios"
     ano: 2022
-    arquivo_local: "C:/Users/Tales/Downloads/Agregados_por_setores_demografia_BR.zip"
+    arquivo_local: "data/raw/demografia_setores_SP.parquet"
+    arquivo_zip_original: "C:/Users/Tales/Downloads/Agregados_por_setores_demografia_BR.zip"
 
   agregados_cor_raca:
-    descricao: "Agregados por setor censitario - cor ou raca"
+    descricao: "Agregados por setor censitario - cor ou raca - filtrado para SP"
     fonte: "IBGE - Censo Demografico 2022 - Agregados por Setores Censitarios"
     ano: 2022
-    arquivo_local: "C:/Users/Tales/Downloads/Agregados_por_setores_cor_ou_raca_BR.zip"
+    arquivo_local: "data/raw/cor_raca_setores_SP.parquet"
+    arquivo_zip_original: "C:/Users/Tales/Downloads/Agregados_por_setores_cor_ou_raca_BR.zip"
 
   agregados_alfabetizacao:
-    descricao: "Agregados por setor censitario - alfabetizacao"
+    descricao: "Agregados por setor censitario - alfabetizacao - filtrado para SP"
     fonte: "IBGE - Censo Demografico 2022 - Agregados por Setores Censitarios"
     ano: 2022
-    arquivo_local: "C:/Users/Tales/Downloads/Agregados_por_setores_alfabetizacao_BR.zip"
+    arquivo_local: "data/raw/alfabetizacao_setores_SP.parquet"
+    arquivo_zip_original: "C:/Users/Tales/Downloads/Agregados_por_setores_alfabetizacao_BR.zip"
 
   agregados_renda:
-    descricao: "Agregados por setor censitario - rendimento do responsavel (V06001 pessoas responsaveis; V06002 moradores; V06004 renda nominal media mensal do responsavel)"
+    descricao: "Agregados por setor censitario - rendimento do responsavel (V06001 pessoas responsaveis; V06002 moradores; V06004 renda nominal media mensal do responsavel) - filtrado para SP"
     fonte: "IBGE - Censo Demografico 2022 - Agregados por Setores Censitarios - Rendimento do Responsavel"
     ano: 2022
-    arquivo_local: "C:/Users/Tales/Downloads/Agregados_por_setores_renda_responsavel_BR_csv.zip"
+    arquivo_local: "data/raw/renda_setores_SP.parquet"
+    arquivo_zip_original: "C:/Users/Tales/Downloads/Agregados_por_setores_renda_responsavel_BR_csv.zip"
     dicionario: "data/raw/dicionario_renda_responsavel.xlsx"
     url_dicionario: "https://ftp.ibge.gov.br/Censos/Censo_Demografico_2022/Agregados_por_Setores_Censitarios_Rendimento_do_Responsavel/dicionario_de_dados_renda_responsavel_20260508.xlsx"
 
@@ -114,3 +119,20 @@ ibge:
 # nao possuem identificacao clara suficiente para uso automatico.
 variaveis_excluidas_automaticamente:
   - "Agregados_por_setores_caracteristicas_domicilio1_BR.zip"
+
+# Pacote de dados reduzido para deploy em nuvem (ver
+# scripts/preparar_dados_cloud.py e src/cloud_data_bootstrap.py).
+pacote_cloud:
+  descricao: "Download automatico dos arquivos parquet acima quando ausentes localmente"
+  url_base: "https://github.com/talesalonso1996-ops/sistema-inteligencia-eleitoral/releases/download/dados-v1"
+  arquivos:
+    - "votacao_secao_2024_SP.parquet"
+    - "consulta_cand_2024_SP.parquet"
+    - "eleitorado_local_votacao_SP.parquet"
+    - "detalhe_votacao_secao_2024_SP.parquet"
+    - "SP_setores_CD2022.parquet"
+    - "SP_bairros_CD2022.parquet"
+    - "demografia_setores_SP.parquet"
+    - "cor_raca_setores_SP.parquet"
+    - "alfabetizacao_setores_SP.parquet"
+    - "renda_setores_SP.parquet"

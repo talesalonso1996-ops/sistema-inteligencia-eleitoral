@@ -87,6 +87,10 @@ def _scan_sql(fonte: dict) -> str:
     if not (len(caminho) > 1 and caminho[1] == ":"):
         caminho = str(resolve_path(caminho))
     caminho = caminho.replace("\\", "/")
+    if caminho.lower().endswith(".parquet"):
+        # Pacote reduzido (ver scripts/preparar_dados_cloud.py) - mesmas
+        # colunas, ja filtrado, sem necessidade de delim/encoding.
+        return f"read_parquet('{caminho}')"
     return (
         f"read_csv('{caminho}', delim='{fonte['separador']}', header=true, quote='\"', "
         f"encoding='{fonte['encoding']}', ignore_errors=true)"

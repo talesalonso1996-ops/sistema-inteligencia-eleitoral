@@ -8,6 +8,7 @@ data/raw/
 data/cache/
 data/geographic/
 data/processed/
+data/cloud_bundle/
 
 # Saidas geradas (relatorios, exports) - nao versionar
 outputs/reports/*.pdf

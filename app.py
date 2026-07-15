@@ -61,6 +61,17 @@ import src.maps as maps
 
 st.set_page_config(page_title="Sistema de Inteligencia Eleitoral", layout="wide", page_icon="\U0001F5F3")
 
+from src.cloud_data_bootstrap import garantir_dados_cloud  # noqa: E402
+
+with st.spinner("Preparando dados (primeira execucao neste ambiente pode levar ~1 min)..."):
+    _dados_ok = garantir_dados_cloud()
+if not _dados_ok:
+    st.error(
+        "Nao foi possivel baixar o pacote de dados necessario. Verifique a "
+        "conexao ou tente novamente em alguns minutos."
+    )
+    st.stop()
+
 _NIVEL_TERRITORIO_DEMOGRAFICO = "NM_DIST"
 VARIAVEIS_DEMOGRAFICAS = indicators_config()["clustering"]["variaveis_demograficas"]
 K_CLUSTERS = indicators_config()["clustering"]["k_fixo"]

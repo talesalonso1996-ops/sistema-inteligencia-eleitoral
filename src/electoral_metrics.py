@@ -133,11 +133,17 @@ def _carregar_detalhe_secao() -> pd.DataFrame | None:
         logger.warning("Arquivo de detalhe por secao nao encontrado: %s", path)
         return None
     con = duckdb.connect()
+    caminho_posix = str(path).replace(chr(92), "/")
+    origem = (
+        f"read_parquet('{caminho_posix}')"
+        if caminho_posix.lower().endswith(".parquet")
+        else f"read_csv('{caminho_posix}', delim=';', header=true, quote='\"', "
+             f"encoding='{fonte['encoding']}', ignore_errors=true)"
+    )
     sql = (
         f"SELECT CD_MUNICIPIO, NR_ZONA, NR_SECAO, DS_CARGO, QT_APTOS, "
         f"QT_COMPARECIMENTO, QT_ABSTENCOES, QT_VOTOS_BRANCOS, QT_VOTOS_NULOS "
-        f"FROM read_csv('{str(path).replace(chr(92), '/')}', delim=';', header=true, "
-        f"quote='\"', encoding='{fonte['encoding']}', ignore_errors=true)"
+        f"FROM {origem}"
     )
     return con.execute(sql).fetchdf()
 

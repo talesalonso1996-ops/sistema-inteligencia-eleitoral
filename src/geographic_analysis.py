@@ -62,13 +62,19 @@ def carregar_coordenadas_locais(candidatura: Candidatura) -> pd.DataFrame:
     fonte = data_sources()["tse"]["eleitorado_local_votacao"]
     con = duckdb.connect()
     con.execute("PRAGMA memory_limit='2GB'")
+    caminho = _caminho(fonte["arquivo_local"])
+    origem = (
+        f"read_parquet('{caminho}')"
+        if caminho.lower().endswith(".parquet")
+        else f"read_csv('{caminho}', delim='{fonte['separador']}', header=true, quote='\"', "
+             f"encoding='{fonte['encoding']}', ignore_errors=true)"
+    )
     sql = f"""
         SELECT
             NR_ZONA, NR_SECAO, NR_LOCAL_VOTACAO, NM_LOCAL_VOTACAO, NM_BAIRRO,
             TRY_CAST(NR_LATITUDE AS DOUBLE) AS latitude,
             TRY_CAST(NR_LONGITUDE AS DOUBLE) AS longitude
-        FROM read_csv('{_caminho(fonte["arquivo_local"])}', delim='{fonte["separador"]}',
-            header=true, quote='"', encoding='{fonte["encoding"]}', ignore_errors=true)
+        FROM {origem}
         WHERE CD_MUNICIPIO = {candidatura.codigo_municipio_tse}
     """
     df = con.execute(sql).fetchdf()
@@ -106,17 +112,21 @@ def carregar_malha(nome_fonte: str, municipio: str) -> gpd.GeoDataFrame | None:
         logger.warning("Malha '%s' nao encontrada em %s", nome_fonte, path)
         return None
     municipio_norm = _normalizar_nome(municipio)
+    eh_parquet = str(path).lower().endswith(".parquet")
     gdf = None
-    try:
-        # OGR SQL faz comparacao literal (sensivel a acento/caixa); tenta
-        # primeiro pelo nome como esta na malha (Title Case, com acento).
-        gdf = gpd.read_file(path, where=f"UPPER(NM_MUN) = '{municipio_norm}'")
-    except Exception:
-        gdf = None
+    if not eh_parquet:
+        try:
+            # OGR SQL faz comparacao literal (sensivel a acento/caixa); tenta
+            # primeiro pelo nome como esta na malha (Title Case, com acento).
+            gdf = gpd.read_file(path, where=f"UPPER(NM_MUN) = '{municipio_norm}'")
+        except Exception:
+            gdf = None
     if gdf is None or gdf.empty:
-        # Fallback: carrega tudo e filtra em pandas normalizando acento/caixa
-        # dos dois lados (nome do TSE pode vir grafado de forma diferente).
-        gdf = gpd.read_file(path)
+        # Fallback (ou caminho direto para GeoParquet, que nao suporta o
+        # filtro OGR SQL acima): carrega tudo e filtra em pandas
+        # normalizando acento/caixa dos dois lados (nome do TSE pode vir
+        # grafado de forma diferente).
+        gdf = gpd.read_parquet(path) if eh_parquet else gpd.read_file(path)
         gdf = gdf[gdf["NM_MUN"].apply(_normalizar_nome) == municipio_norm]
     if gdf.empty:
         logger.warning(
