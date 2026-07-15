@@ -1,0 +1,38 @@
+# Pesos do Indice de Performance Eleitoral Territorial (0-100).
+# Alteravel sem mexer no codigo (secao 11 do briefing). A soma dos pesos
+# deve ser 1.0 - validado em src/potential_index.py.
+
+indice_performance:
+  pesos:
+    percentual_votos_territorio: 0.30      # % de votos validos do candidato no territorio
+    desempenho_vs_media: 0.20              # desvio em relacao a media geral do candidato
+    participacao_no_total_candidato: 0.15  # quanto do total de votos do candidato vem deste territorio
+    comparecimento: 0.10                   # comparecimento do territorio (eleitorado ativo)
+    distancia_concorrente_principal: 0.15  # quao perto/longe do 1o colocado no territorio
+    concentracao_territorial_penalidade: 0.10  # penaliza dependencia excessiva de 1 territorio
+
+  limites_classificacao:
+    fortaleza: 80
+    consolidado: 60
+    competitivo: 40
+    crescimento: 20
+    baixa_penetracao: 0
+
+  limitacoes_metodologicas: >
+    Indice construido a partir de dados agregados por territorio (municipio,
+    zona, local de votacao ou bairro) e nao permite qualquer inferencia sobre
+    o voto de eleitores individuais. Pesos sao normativos, definidos manualmente
+    e podem ser recalibrados neste arquivo. Nao ha validacao externa (pesquisa
+    de opiniao) associada ao indice.
+
+clustering:
+  algoritmo_padrao: "kmeans"
+  k_min: 2
+  k_max: 8
+  k_fixo: 10  # segmentacao padrao exibida no produto (secao "Estatistica Avancada")
+  variaveis_demograficas:
+    - "renda_media_responsavel"
+    - "pct_alfabetizado_15mais"
+    - "pct_preta_parda"
+    - "idade_media_aprox"
+    - "pct_masculino"
