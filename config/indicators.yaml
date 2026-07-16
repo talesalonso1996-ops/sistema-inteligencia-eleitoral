@@ -36,3 +36,113 @@ clustering:
     - "pct_preta_parda"
     - "idade_media_aprox"
     - "pct_masculino"
+
+# Abordagem de Maslow (secao "Abordagem de Maslow" do produto).
+#
+# ATENCAO METODOLOGICA: a Piramide de Maslow e uma teoria psicologica sobre
+# motivacao INDIVIDUAL - nao e mensuravel diretamente a partir de dados
+# agregados de setor censitario. Este bloco NAO define uma medicao
+# psicologica: define, de forma transparente e auditavel, qual variavel
+# demografica (das mesmas 5 ja usadas em clustering.variaveis_demograficas)
+# funciona como PROXY socioeconomico de cada nivel da piramide, seguindo a
+# forma como a literatura de ciencias sociais opera Maslow empiricamente
+# (renda/escolaridade como proxies de status/seguranca material). Niveis sem
+# proxy defensavel (Social/Pertencimento, Autorrealizacao) ficam
+# explicitamente marcados como lacuna (status: "sem_proxy") - nunca
+# preenchidos com uma variavel fraca so para completar a piramide.
+piramide_maslow:
+  # Ordem hierarquica da base ao topo - tambem usada para desenhar o grafico.
+  ordem_tiers:
+    - fisiologico
+    - seguranca
+    - social
+    - estima
+    - autorrealizacao
+
+  tiers:
+    fisiologico:
+      label: "Fisiologico"
+      status: "mapeado"
+      variaveis:
+        - nome: "renda_media_responsavel"
+          rationale: >
+            Renda media do responsavel pelo domicilio e o proxy
+            socioeconomico (SES) classico para capacidade de suprir
+            necessidades materiais basicas - indicador padrao de privacao/
+            seguranca material em ciencias sociais.
+
+    seguranca:
+      label: "Seguranca"
+      status: "mapeado"
+      variaveis:
+        - nome: "renda_media_responsavel"
+          rationale: >
+            A mesma renda tambem serve de proxy para seguranca financeira/
+            material (SES cobre Fisiologico e Seguranca em conjunto; nao ha,
+            nesta base, uma variavel especifica so para seguranca fisica -
+            por isso a mesma variavel aparece nos dois niveis adjacentes).
+        - nome: "pct_preta_parda"
+          rationale: >
+            Literatura brasileira sobre desigualdade racial e exposicao a
+            violencia/vulnerabilidade estrutural (ex.: Atlas da Violencia,
+            IPEA) associa percentual de populacao preta/parda de um
+            territorio a maior insegurança estrutural. IMPORTANTE: e uma
+            proxy SOCIOLOGICA sobre o TERRITORIO (contexto de politica
+            publica e desigualdade historica), nao uma afirmacao sobre
+            individuos ou sobre a psicologia de uma raca - inclusao
+            confirmada explicitamente pelo cliente, com esta ressalva
+            sempre exibida junto ao dado.
+
+    social:
+      label: "Social / Pertencimento"
+      status: "sem_proxy"
+      variaveis: []
+      motivo_sem_proxy: >
+        Nao ha, nas variaveis demograficas de setor censitario disponiveis
+        nesta base, nenhum indicador de vinculo comunitario ou pertencimento
+        social - dado nao mensuravel a partir do Censo 2022 usado aqui.
+
+    estima:
+      label: "Estima"
+      status: "mapeado"
+      variaveis:
+        - nome: "pct_alfabetizado_15mais"
+          rationale: >
+            Escolaridade/alfabetizacao e um proxy consolidado na literatura
+            de ciencias sociais para status social, reconhecimento e
+            dignidade (capital cultural associado a educacao).
+
+    autorrealizacao:
+      label: "Autorrealizacao"
+      status: "sem_proxy"
+      variaveis: []
+      motivo_sem_proxy: >
+        Autorrealizacao e um construto psicologico individual de dificil
+        operacionalizacao com dados agregados de setor censitario - nenhuma
+        variavel disponivel nesta base e um proxy defensavel.
+
+  # Variaveis usadas no modelo estatistico mas sem correspondencia teorica
+  # direta com nenhum nivel da piramide (controles demograficos, mostrados
+  # a parte, nunca forcados em um nivel so para "completar" a analise).
+  variaveis_sem_correspondencia_teorica:
+    - nome: "idade_media_aprox"
+      motivo: >
+        Variavel de controle demografico (faixa etaria media), sem
+        correspondencia teorica direta com nenhum nivel da piramide de
+        Maslow.
+    - nome: "pct_masculino"
+      motivo: >
+        Variavel de controle demografico (composicao por sexo), sem
+        correspondencia teorica direta com nenhum nivel da piramide de
+        Maslow.
+
+  aviso_metodologico: >
+    A Piramide de Maslow e uma teoria psicologica sobre motivacao
+    INDIVIDUAL, nao uma metrica diretamente mensuravel a partir de dados
+    agregados de setor censitario. Esta secao NAO mede o estado
+    psicologico do eleitorado: ela reinterpreta, como LENTE teorica, os
+    coeficientes/odds ratios JA CALCULADOS pelos modelos estatisticos
+    documentados na secao "Estatistica Avancada", associando cada variavel
+    demografica ao nivel da piramide que a literatura de ciencias sociais
+    usa como proxy empirico mais proximo. Nenhum numero novo e calculado
+    ou fabricado aqui.

@@ -45,6 +45,7 @@ class DadosRelatorio:
     delta_rivais: pd.DataFrame | None = None
     bairros_potencial: pd.DataFrame | None = None
     rivais_similaridade: pd.DataFrame | None = None
+    maslow: object | None = None  # ResultadoMaslow (src/maslow_analysis.py)
 
 
 def _formatar_numero(valor) -> str:
@@ -136,6 +137,23 @@ def gerar_relatorio_html(dados: DadosRelatorio) -> str:
   {dados.delta_rivais.head(30).to_html(index=False, classes='tabela', border=0)}
 """
 
+    secao_maslow = ""
+    if dados.maslow is not None and dados.maslow.fonte_efeito != "indisponivel":
+        m = dados.maslow
+        mapeadas = m.tiers_mapeados.query("status == 'mapeado'") if not m.tiers_mapeados.empty else m.tiers_mapeados
+        if not mapeadas.empty:
+            mapeadas_html = mapeadas.to_html(index=False, classes="tabela", border=0)
+            sem_proxy_html = m.tiers_sem_proxy.to_html(index=False, classes="tabela", border=0)
+            narrativa_html = "<ul>" + "".join(f"<li>{f}</li>" for f in m.narrativa) + "</ul>"
+            secao_maslow = f"""
+  <h2>Abordagem de Maslow (lente interpretativa)</h2>
+  <p><i>{m.disclaimer}</i></p>
+  {mapeadas_html}
+  {narrativa_html}
+  <h3>Niveis sem proxy disponivel nos dados atuais</h3>
+  {sem_proxy_html}
+"""
+
     return f"""<!doctype html>
 <html lang="pt-BR"><head><meta charset="utf-8">
 <title>Relatorio Executivo - {c.nome_urna}</title>
@@ -184,6 +202,8 @@ def gerar_relatorio_html(dados: DadosRelatorio) -> str:
   {secao_logistica}
   {secao_clusters}
   {secao_potencial}
+
+  {secao_maslow}
 
   <h2>Graficos</h2>
   {graficos_html}
@@ -307,6 +327,18 @@ def gerar_relatorio_pdf(dados: DadosRelatorio, caminho: str | Path) -> Path:
         for _, linha in dados.clusters_narrativa.iterrows():
             elementos += [Paragraph(f"<b>{linha['rotulo_acao']}</b> - {linha['resumo']}", styles["Normal"])]
         elementos += [Spacer(1, 12)]
+
+    if dados.maslow is not None and dados.maslow.fonte_efeito != "indisponivel":
+        m = dados.maslow
+        mapeadas = m.tiers_mapeados.query("status == 'mapeado'") if not m.tiers_mapeados.empty else m.tiers_mapeados
+        if not mapeadas.empty:
+            elementos += [
+                Paragraph("Abordagem de Maslow (lente interpretativa)", secao_style),
+                Paragraph(m.disclaimer, styles["Normal"]),
+            ]
+            for frase in m.narrativa:
+                elementos += [Paragraph(f"- {frase}", styles["Normal"])]
+            elementos += [Spacer(1, 12)]
 
     if dados.limitacoes:
         elementos += [Paragraph("Limitacoes metodologicas", secao_style)]

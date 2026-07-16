@@ -50,6 +50,7 @@ from src.geographic_analysis import (
     total_votos_validos_por_territorio,
     uf_tem_malha_completa,
 )
+from src.maslow_analysis import gerar_analise_maslow
 from src.potential_analysis import identificar_bairros_potencial
 from src.potential_index import calcular_indice_performance
 from src.regression_models import regressao_linear_votos, regressao_logistica_bom_desempenho
@@ -290,7 +291,7 @@ st.markdown(
 secao = st.sidebar.radio(
     "Navegacao",
     ["Visao Geral", "Concorrencia", "Territorio", "Geografia", "Demografia",
-     "Estatistica Avancada", "Relatorio"],
+     "Estatistica Avancada", "Abordagem de Maslow", "Relatorio"],
 )
 
 # ============================================================ Visao Geral
@@ -614,6 +615,80 @@ elif secao == "Estatistica Avancada":
                 else:
                     st.info("Segmentacao de clusters indisponivel - potencial nao calculado.")
 
+# ===================================================== Abordagem de Maslow
+elif secao == "Abordagem de Maslow":
+    if not uf_tem_malha_completa(candidatura.uf):
+        st.info(f"Malha geografica nao configurada para a UF '{candidatura.uf}'.")
+    else:
+        with st.spinner("Recalculando modelos estatisticos para aplicar a lente de Maslow..."):
+            pontos, enriquecido, _ = _geo()
+            perfil_setor, base_territorio = _demo(enriquecido)
+
+        if base_territorio.empty:
+            st.info("Dados insuficientes para aplicar a abordagem de Maslow.")
+        else:
+            variaveis_disp = [v for v in VARIAVEIS_DEMOGRAFICAS if v in base_territorio.columns]
+
+            st.warning(
+                "Esta secao NAO mede psicologia do eleitorado. Ela reinterpreta, como lente "
+                "teorica, os coeficientes/odds ratios ja calculados por modelos estatisticos "
+                "reais (secao 'Estatistica Avancada'), usando proxies socioeconomicos "
+                "consagrados na literatura de ciencias sociais. Nenhum numero psicologico e "
+                "medido ou estimado - niveis sem proxy defensavel nos dados aparecem como "
+                "lacuna explicita, nao sao preenchidos artificialmente."
+            )
+
+            modelo_log_m, issues_log_m = regressao_logistica_bom_desempenho(
+                base_territorio, "pct_votos_validos_territorio", variaveis_disp
+            )
+            for issue in issues_log_m:
+                st.warning(issue.mensagem)
+
+            modelo_lin_m, corr_m = None, None
+            if modelo_log_m is None:
+                modelo_lin_m, issues_lin_m = regressao_linear_votos(base_territorio, "votos_candidato", variaveis_disp)
+                for issue in issues_lin_m:
+                    st.warning(issue.mensagem)
+                if modelo_lin_m is None:
+                    corr_m, issues_corr_m = correlacoes_com_votos(base_territorio, "votos_candidato", variaveis_disp)
+                    for issue in issues_corr_m:
+                        st.warning(issue.mensagem)
+
+            resultado_maslow = gerar_analise_maslow(modelo_log_m, modelo_lin_m, corr_m)
+            st.caption(resultado_maslow.disclaimer)
+
+            mapeadas = resultado_maslow.tiers_mapeados.query("status == 'mapeado'") if not resultado_maslow.tiers_mapeados.empty else resultado_maslow.tiers_mapeados
+            with st.container(border=True):
+                st.subheader("Niveis da piramide com proxy mapeado")
+                if not mapeadas.empty:
+                    st.plotly_chart(
+                        charts.grafico_piramide_maslow(
+                            resultado_maslow.tiers_mapeados, resultado_maslow.tiers_sem_proxy,
+                            resultado_maslow.ordem_tiers,
+                        ),
+                        use_container_width=True,
+                    )
+                    st.dataframe(mapeadas, use_container_width=True)
+                    for frase in resultado_maslow.narrativa:
+                        st.markdown(f"- {frase}")
+                else:
+                    st.info("Nenhum modelo estatistico disponivel para aplicar a lente de Maslow nesta candidatura.")
+                    for frase in resultado_maslow.narrativa:
+                        st.markdown(f"- {frase}")
+
+            with st.container(border=True):
+                st.subheader("Niveis sem proxy disponivel nos dados atuais")
+                st.dataframe(resultado_maslow.tiers_sem_proxy, use_container_width=True)
+
+            if not resultado_maslow.variaveis_pendentes.empty:
+                with st.container(border=True):
+                    st.subheader("Variaveis com mapeamento pendente de decisao do cliente")
+                    st.dataframe(resultado_maslow.variaveis_pendentes, use_container_width=True)
+
+            with st.container(border=True):
+                st.subheader("Variaveis demograficas sem correspondencia teorica direta")
+                st.dataframe(resultado_maslow.variaveis_sem_correspondencia, use_container_width=True)
+
 # ================================================================ Relatorio
 elif secao == "Relatorio":
     st.write("Gere o relatorio executivo ou exporte os dados desta candidatura.")
@@ -627,6 +702,7 @@ elif secao == "Relatorio":
     potencial_rel = None
     rivais_sim_rel = None
     delta_rel = None
+    resultado_maslow_rel = None
 
     if uf_tem_malha_completa(candidatura.uf):
         pontos, enriquecido, avisos_geo = _geo()
@@ -645,6 +721,10 @@ elif secao == "Relatorio":
                 potencial_rel = identificar_bairros_potencial(
                     resultado_clustering_rel, modelo_log_rel, _NIVEL_TERRITORIO_DEMOGRAFICO, "votos_candidato",
                 )
+            modelo_lin_rel = None
+            if modelo_log_rel is None:
+                modelo_lin_rel, _ = regressao_linear_votos(base_territorio_rel, "votos_candidato", variaveis_disp)
+            resultado_maslow_rel = gerar_analise_maslow(modelo_log_rel, modelo_lin_rel, corr_rel)
     else:
         limitacoes = [f"Malha geografica nao configurada para a UF '{candidatura.uf}'."]
 
@@ -665,6 +745,15 @@ elif secao == "Relatorio":
         figuras["Rivais por similaridade de base eleitoral"] = charts.grafico_rivais_similaridade(rivais_sim_rel)
     if potencial_rel is not None and not potencial_rel.empty:
         figuras["Territorios com maior potencial"] = charts.grafico_bairros_potencial(potencial_rel, _NIVEL_TERRITORIO_DEMOGRAFICO)
+    if (
+        resultado_maslow_rel is not None
+        and not resultado_maslow_rel.tiers_mapeados.empty
+        and not resultado_maslow_rel.tiers_mapeados.query("status == 'mapeado'").empty
+    ):
+        figuras["Piramide de Maslow"] = charts.grafico_piramide_maslow(
+            resultado_maslow_rel.tiers_mapeados, resultado_maslow_rel.tiers_sem_proxy,
+            resultado_maslow_rel.ordem_tiers,
+        )
 
     dados_relatorio = DadosRelatorio(
         candidatura=candidatura, resultado_geral=rg, ranking=ranking,
@@ -672,6 +761,7 @@ elif secao == "Relatorio":
         limitacoes=limitacoes, figuras=figuras,
         regressao_logistica=modelo_log_rel, clusters_narrativa=narrativa_rel,
         delta_rivais=delta_rel, bairros_potencial=potencial_rel, rivais_similaridade=rivais_sim_rel,
+        maslow=resultado_maslow_rel,
     )
 
     col1, col2, col3 = st.columns(3)
@@ -698,6 +788,9 @@ elif secao == "Relatorio":
             planilhas["Bairros_Potencial"] = potencial_rel
         if modelo_log_rel is not None:
             planilhas["Regressao_Logistica"] = modelo_log_rel.coeficientes
+        if resultado_maslow_rel is not None and resultado_maslow_rel.fonte_efeito != "indisponivel":
+            planilhas["Maslow_Tiers"] = resultado_maslow_rel.tiers_mapeados
+            planilhas["Maslow_Sem_Proxy"] = resultado_maslow_rel.tiers_sem_proxy
         xlsx_path = resolve_path(f"outputs/reports/dados_{candidatura.numero}_{candidatura.codigo_municipio_tse}.xlsx")
         exportar_excel(xlsx_path, planilhas)
         st.download_button("Baixar dados (Excel)", xlsx_path.read_bytes(), file_name=xlsx_path.name)

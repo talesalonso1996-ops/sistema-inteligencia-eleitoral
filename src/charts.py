@@ -301,3 +301,53 @@ def grafico_pizza_votos_validos(rg) -> go.Figure:
         hole=0.55,
     ))
     return _aplicar_layout(fig, "Participacao nos votos validos da disputa", altura=350)
+
+
+def grafico_piramide_maslow(
+    tiers_mapeados: pd.DataFrame, tiers_sem_proxy: pd.DataFrame, ordem_tiers: list[str]
+) -> go.Figure:
+    """Barras horizontais na ordem hierarquica de Maslow (base embaixo,
+    topo em cima): comprimento = magnitude do efeito ja calculado
+    (log-odds/coeficiente/correlacao), cor = polaridade (paleta DIVERGENTE
+    - azul aumenta a chance/votos, vermelho reduz, mesma convencao de
+    grafico_correlacoes). Niveis sem proxy disponivel viram uma barra
+    cinza hachurada de tamanho fixo pequeno + anotacao textual - NUNCA um
+    numero inventado."""
+    labels_por_tier: dict[str, str] = {}
+    if not tiers_mapeados.empty:
+        for tier_key, grupo in tiers_mapeados.dropna(subset=["tier"]).groupby("tier"):
+            labels_por_tier[tier_key] = grupo["label"].iloc[0]
+    for _, row in tiers_sem_proxy.iterrows():
+        labels_por_tier.setdefault(row["tier"], row["label"])
+
+    mapeadas = tiers_mapeados[tiers_mapeados["status"] == "mapeado"] if not tiers_mapeados.empty else tiers_mapeados
+    magnitude_maxima = float(mapeadas["magnitude"].max()) if not mapeadas.empty else 1.0
+    stub = max(magnitude_maxima * 0.15, 0.05)
+
+    fig = go.Figure()
+    for tier_key in reversed(ordem_tiers):
+        label = labels_por_tier.get(tier_key, tier_key)
+        subset = mapeadas[mapeadas["tier"] == tier_key] if not mapeadas.empty else mapeadas
+
+        if subset is not None and not subset.empty:
+            valor_medio = float(subset["valor_efeito"].mean())
+            aumenta = valor_medio > 1 if (subset["tipo_efeito"] == "odds_ratio").all() else valor_medio > 0
+            cor = DIVERGENTE[2] if aumenta else DIVERGENTE[0]
+            fig.add_trace(go.Bar(
+                x=[float(subset["magnitude"].mean())], y=[label], orientation="h",
+                marker_color=cor, text=[", ".join(subset["variavel"])], textposition="outside",
+                showlegend=False,
+            ))
+        else:
+            fig.add_trace(go.Bar(
+                x=[stub], y=[label], orientation="h", showlegend=False,
+                marker=dict(color="rgba(0,0,0,0)", pattern=dict(shape="/", fgcolor="#5b6270"),
+                            line=dict(color="#5b6270", width=1)),
+            ))
+            fig.add_annotation(
+                x=stub * 1.15, y=label, text="sem proxy disponivel", showarrow=False,
+                xanchor="left", font=dict(color="#8a92a3", size=11),
+            )
+
+    fig.update_layout(yaxis=dict(categoryorder="array", categoryarray=[labels_por_tier.get(t, t) for t in reversed(ordem_tiers)]))
+    return _aplicar_layout(fig, "Piramide de Maslow - proxies demograficos e efeito estimado", altura=420)
