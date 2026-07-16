@@ -53,7 +53,13 @@ def _caminho(caminho: str) -> str:
 def carregar_coordenadas_locais(candidatura: Candidatura) -> pd.DataFrame:
     """Carrega lat/long + bairro (auto-declarado pelo TSE) de cada local de
     votacao do municipio da candidatura, a partir do arquivo nacional de
-    eleitorado por local de votacao."""
+    eleitorado por local de votacao.
+
+    O arquivo original tem uma linha por SECAO (varias secoes podem
+    funcionar no mesmo predio/local, todas com a mesma coordenada) -
+    agregamos aqui para uma linha por (zona, local de votacao), senao um
+    local com N secoes apareceria N vezes nas etapas seguintes (inflando
+    artificialmente contagens de votos por bairro/territorio)."""
     key = cache_key("coordenadas_locais", candidatura.codigo_municipio_tse)
     cached = read_cache("geographic_analysis", key)
     if cached is not None:
@@ -71,11 +77,14 @@ def carregar_coordenadas_locais(candidatura: Candidatura) -> pd.DataFrame:
     )
     sql = f"""
         SELECT
-            NR_ZONA, NR_SECAO, NR_LOCAL_VOTACAO, NM_LOCAL_VOTACAO, NM_BAIRRO,
-            TRY_CAST(NR_LATITUDE AS DOUBLE) AS latitude,
-            TRY_CAST(NR_LONGITUDE AS DOUBLE) AS longitude
+            NR_ZONA, NR_LOCAL_VOTACAO,
+            ANY_VALUE(NM_LOCAL_VOTACAO) AS NM_LOCAL_VOTACAO,
+            ANY_VALUE(NM_BAIRRO) AS NM_BAIRRO,
+            ANY_VALUE(TRY_CAST(NR_LATITUDE AS DOUBLE)) AS latitude,
+            ANY_VALUE(TRY_CAST(NR_LONGITUDE AS DOUBLE)) AS longitude
         FROM {origem}
         WHERE CD_MUNICIPIO = {candidatura.codigo_municipio_tse}
+        GROUP BY NR_ZONA, NR_LOCAL_VOTACAO
     """
     df = con.execute(sql).fetchdf()
     df = df.dropna(subset=["latitude", "longitude"])
@@ -88,7 +97,15 @@ def juntar_votos_com_coordenadas(
     votos_candidatura: pd.DataFrame, coordenadas: pd.DataFrame
 ) -> pd.DataFrame:
     """Agrega votos do candidato por local de votacao e junta com as
-    coordenadas correspondentes (chave: NR_ZONA + NR_LOCAL_VOTACAO)."""
+    coordenadas correspondentes (chave: NR_ZONA + NR_LOCAL_VOTACAO).
+
+    Tambem cria `local_votacao_id`: identificador unico e legivel do local
+    de votacao (nome + zona + numero do local). Este e o nivel territorial
+    usado nas analises estatisticas (regressao/clusterizacao/Maslow) em vez
+    de distrito/bairro - a maioria dos municipios brasileiros tem poucos
+    distritos oficiais (as vezes so 1, a sede), o que deixa a amostra
+    pequena demais para qualquer analise; local de votacao existe em
+    quantidade suficiente em qualquer municipio, por menor que seja."""
     votos_local = (
         votos_candidatura.groupby(["NR_ZONA", "NR_LOCAL_VOTACAO"], as_index=False)["QT_VOTOS"]
         .sum()
@@ -100,6 +117,10 @@ def juntar_votos_com_coordenadas(
         logger.warning(
             "%s de %s locais de votacao sem coordenada disponivel", sem_coordenada, len(out)
         )
+    nome_local = out["NM_LOCAL_VOTACAO"].fillna("LOCAL SEM NOME").astype(str)
+    out["local_votacao_id"] = (
+        nome_local + " (Zona " + out["NR_ZONA"].astype(str) + ", Local " + out["NR_LOCAL_VOTACAO"].astype(str) + ")"
+    )
     return out
 
 
@@ -161,6 +182,7 @@ def atribuir_setor_e_bairro(
         )
         return pontos, avisos
 
+    sem_coordenada = pontos[pontos["latitude"].isna() | pontos["longitude"].isna()]
     validos = pontos.dropna(subset=["latitude", "longitude"])
     if validos.empty:
         avisos.append("Nenhum local de votacao com coordenadas validas para join espacial.")
@@ -207,12 +229,28 @@ def atribuir_setor_e_bairro(
         gdf_pontos["NM_BAIRRO_IBGE"] = None
 
     resultado = pd.DataFrame(gdf_pontos.drop(columns="geometry"))
-    faltantes = int(resultado["CD_SETOR"].isna().sum()) if "CD_SETOR" in resultado else len(resultado)
-    if faltantes:
+    if not sem_coordenada.empty:
+        # Locais sem coordenada nunca entram no join espacial, mas continuam
+        # com votos reais - mantidos aqui (setor/bairro/distrito em branco)
+        # para que nenhum voto desapareca silenciosamente dos totais
+        # agregados por territorio (bairros_agg, regressao, clusterizacao
+        # etc.), que meses depois passam a nao bater com o total oficial do
+        # candidato.
+        resultado = pd.concat([resultado, sem_coordenada], ignore_index=True, sort=False)
+        votos_sem_coordenada = int(sem_coordenada["votos_candidato"].sum())
         avisos.append(
-            f"{faltantes} de {len(resultado)} locais de votacao nao caíram dentro de "
-            "nenhum poligono de setor censitario (possivel erro de coordenada ou "
-            "poligono desatualizado)."
+            f"{len(sem_coordenada)} locais de votacao ({votos_sem_coordenada} votos do candidato) "
+            "sem coordenada geografica disponivel - aparecem nas analises por territorio como "
+            "'nao identificado', nunca sao descartados dos totais."
+        )
+
+    faltantes = int(resultado["CD_SETOR"].isna().sum()) if "CD_SETOR" in resultado else len(resultado)
+    faltantes_com_coordenada = faltantes - len(sem_coordenada)
+    if faltantes_com_coordenada > 0:
+        avisos.append(
+            f"{faltantes_com_coordenada} de {len(resultado)} locais de votacao tinham coordenada "
+            "mas nao caíram dentro de nenhum poligono de setor censitario (possivel erro de "
+            "coordenada ou poligono desatualizado)."
         )
     return resultado, avisos
 

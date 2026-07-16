@@ -28,8 +28,16 @@ def gerar_voronoi(
     """Gera poligonos de Voronoi para os locais de votacao (pontos com
     lat/long validas), recortados pela fronteira do municipio. Retorna
     None se houver menos de 4 pontos (Voronoi nao e informativo)."""
-    validos = pontos.dropna(subset=["latitude", "longitude"]).drop_duplicates(
-        subset=["latitude", "longitude"]
+    # Locais de votacao co-localizados (mesma lat/long exata - comum em
+    # complexos com varios locais registrados no mesmo predio) precisam
+    # virar UM ponto para o Voronoi (2 pontos identicos nao geram poligonos
+    # distintos), mas os votos de cada local tem que ser somados no ponto
+    # resultante - um drop_duplicates ingenuo manteria so o primeiro local e
+    # descartaria silenciosamente os votos dos outros do mapa de densidade.
+    com_coordenada = pontos.dropna(subset=["latitude", "longitude"])
+    validos = com_coordenada.groupby(["latitude", "longitude"], as_index=False).agg(
+        votos_candidato=("votos_candidato", "sum"),
+        local_votacao_id=("local_votacao_id", lambda s: " / ".join(dict.fromkeys(s.astype(str)))),
     )
     if len(validos) < 4:
         logger.warning("Apenas %s locais com coordenada unica - Voronoi nao gerado.", len(validos))

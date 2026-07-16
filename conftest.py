@@ -20,7 +20,7 @@ from src.geographic_analysis import (
     total_votos_validos_por_territorio,
 )
 
-_NIVEL_DEMOGRAFICO = "NM_DIST"
+_NIVEL_DEMOGRAFICO = "local_votacao_id"
 
 
 @pytest.fixture(scope="session")
@@ -45,8 +45,8 @@ def ranking_sp(dados_disputa):
 
 @pytest.fixture(scope="session")
 def base_territorio_sp(candidatura_sp, dados_disputa):
-    """Base por distrito (votos + perfil demografico + votos validos do
-    territorio) - mesma montagem usada em app.py, reaproveitada pelos
+    """Base por local de votacao (votos + perfil demografico + votos validos
+    do territorio) - mesma montagem usada em app.py, reaproveitada pelos
     testes de regressao/clustering/potencial."""
     vc, vd, _ = dados_disputa
     coords = carregar_coordenadas_locais(candidatura_sp)

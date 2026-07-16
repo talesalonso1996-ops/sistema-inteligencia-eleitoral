@@ -57,6 +57,7 @@ from src.potential_index import calcular_indice_performance
 from src.regression_models import regressao_linear_votos, regressao_logistica_bom_desempenho
 from src.report_generator import DadosRelatorio, gerar_relatorio_html, gerar_relatorio_pdf
 from src.utils import indicators_config, resolve_path
+from src.vote_filtering import secao_composta
 from src.voronoi_analysis import gerar_voronoi
 import src.charts as charts
 import src.maps as maps
@@ -74,7 +75,14 @@ if not _dados_ok:
     )
     st.stop()
 
-_NIVEL_TERRITORIO_DEMOGRAFICO = "NM_DIST"
+_NIVEL_TERRITORIO_DEMOGRAFICO = "local_votacao_id"
+# Nivel territorial usado nas analises estatisticas (regressao/clusterizacao/
+# Maslow). Local de votacao (nao distrito/bairro) - a maioria dos municipios
+# brasileiros tem poucos distritos oficiais (as vezes so 1), o que deixa
+# regressao/clusterizacao sem amostra suficiente; local de votacao existe
+# em quantidade suficiente em qualquer municipio. O mapa coropletico da aba
+# Geografia continua por distrito/bairro (nivel geografico com poligono
+# desenhavel - local de votacao e ponto, nao poligono).
 VARIAVEIS_DEMOGRAFICAS = indicators_config()["clustering"]["variaveis_demograficas"]
 K_CLUSTERS = indicators_config()["clustering"]["k_fixo"]
 
@@ -182,6 +190,11 @@ def _carregar_dados_candidatura(numero, municipio_tse, cargo, ano, turno):
     vc = votos_da_candidatura(candidatura)
     vd = votos_da_disputa(candidatura)
     rd = registro_candidatos_disputa(candidatura)
+    # NR_SECAO sozinho nao identifica uma secao fisica (a numeracao reinicia
+    # a cada zona) - a coluna composta e o nivel territorial correto sempre
+    # que o usuario escolhe "Secao eleitoral" em qualquer aba do app.
+    vc["NR_SECAO_COMPOSTA"] = secao_composta(vc)
+    vd["NR_SECAO_COMPOSTA"] = secao_composta(vd)
     return candidatura, vc, vd, rd
 
 
@@ -388,7 +401,7 @@ elif secao == "Territorio":
         "Nivel territorial", ["Zona eleitoral", "Secao eleitoral"], horizontal=True,
         index=0 if st.session_state["nivel_territorial"] == "NR_ZONA" else 1,
     )
-    st.session_state["nivel_territorial"] = "NR_ZONA" if nivel_label == "Zona eleitoral" else "NR_SECAO"
+    st.session_state["nivel_territorial"] = "NR_ZONA" if nivel_label == "Zona eleitoral" else "NR_SECAO_COMPOSTA"
     nivel = st.session_state["nivel_territorial"]
 
     terr = desempenho_territorial(candidatura, vc, vd, rd, nivel)
@@ -616,7 +629,7 @@ elif secao == "Estatistica Avancada":
                     st.dataframe(resultado_clustering.perfil_clusters, use_container_width=True)
 
             with st.container(border=True):
-                st.subheader("Bairros/distritos com maior potencial de crescimento")
+                st.subheader("Locais de votacao com maior potencial de crescimento")
                 _explicacao(
                     "Combina o quanto o territorio esta abaixo da media de territorios com "
                     "perfil demografico parecido (mesmo cluster) com a probabilidade prevista "

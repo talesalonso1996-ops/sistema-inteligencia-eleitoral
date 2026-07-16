@@ -121,7 +121,19 @@ def _candidaturas_registro(numero_candidato: int) -> pd.DataFrame:
         WHERE NR_CANDIDATO = {int(numero_candidato)}
           AND DS_ELEICAO ILIKE '%Eleições Municipais%'
           AND TP_ABRANGENCIA = 'MUNICIPAL'
+          AND DS_SIT_TOT_TURNO != '#NULO'
     """
+    # DS_SIT_TOT_TURNO = '#NULO' marca uma candidatura cujo registro foi
+    # anulado/substituido (2.200 casos em SP) - a pessoa nunca apareceu na
+    # urna e nao recebeu voto real nenhum. Sem este filtro, quando o mesmo
+    # numero teve substituicao (ex.: candidato titular anulado, suplente/
+    # substituto assume o numero), consulta_cand mantem as DUAS linhas de
+    # registro para o mesmo (numero, municipio, cargo, turno); o merge com
+    # os votos (agregados 1x por essa chave) duplicava o MESMO total de
+    # votos reais para as duas pessoas, como se ambas tivessem recebido a
+    # votacao inteira (caso real verificado: Pitangueiras/SP, numero 30000,
+    # vereador - "MARCELAO" #NULO e "MARIA FERNANDA" NAO ELEITO apareciam
+    # ambos com 79 votos, sendo que so a segunda de fato concorreu).
     logger.info("Consultando registro de candidaturas (consulta_cand) para numero=%s", numero_candidato)
     return con.execute(sql).fetchdf()
 
@@ -157,7 +169,7 @@ def buscar_candidaturas(numero_candidato: int) -> list[Candidatura]:
     """Retorna todas as candidaturas encontradas para o numero informado,
     cruzando registro (consulta_cand) com votos (votacao_secao). Usa cache
     em parquet para nao reprocessar o CSV de 2,7 GB a cada consulta."""
-    key = cache_key("candidaturas_v2", numero_candidato)
+    key = cache_key("candidaturas_v3", numero_candidato)
     cached = read_cache("candidate_finder", key)
     if cached is not None:
         df = cached

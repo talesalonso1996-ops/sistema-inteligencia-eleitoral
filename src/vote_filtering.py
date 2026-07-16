@@ -37,3 +37,17 @@ def votos_legenda(votos_disputa: pd.DataFrame, registro_disputa: pd.DataFrame) -
     """Apenas os votos de legenda (complementar a `votos_nominais`)."""
     numeros_partido = set(registro_disputa["numero_partido"].dropna().unique())
     return votos_disputa[votos_disputa["NR_VOTAVEL"].isin(numeros_partido)].copy()
+
+
+def secao_composta(votos: pd.DataFrame) -> pd.Series:
+    """Identificador unico de secao eleitoral (NR_ZONA + NR_SECAO).
+
+    NR_SECAO sozinho NAO identifica uma secao fisica dentro do municipio:
+    a numeracao de secao reinicia a cada zona eleitoral, entao duas secoes
+    fisicas de zonas diferentes podem ter o mesmo NR_SECAO (ex.: em Sao
+    Paulo capital, 934 dos 1007 numeros de secao aparecem em mais de uma
+    zona). Agrupar por NR_SECAO cru soma votos de secoes fisicas distintas
+    e nao relacionadas sob um unico rotulo - usar sempre esta coluna
+    composta como nivel territorial quando o usuario escolhe 'Secao
+    eleitoral', nunca a coluna NR_SECAO isolada."""
+    return "Zona " + votos["NR_ZONA"].astype(str) + " - Secao " + votos["NR_SECAO"].astype(str)

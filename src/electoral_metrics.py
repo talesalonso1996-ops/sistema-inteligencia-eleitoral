@@ -13,6 +13,7 @@ import pandas as pd
 
 from .candidate_finder import Candidatura
 from .utils import data_sources, get_logger, resolve_path
+from .vote_filtering import secao_composta
 from .vote_filtering import votos_nominais as _votos_nominais
 from .vote_filtering import votos_validos as _votos_validos
 
@@ -216,7 +217,15 @@ def enriquecer_com_comparecimento_abstencao(
         (detalhe["CD_MUNICIPIO"] == candidatura.codigo_municipio_tse)
         & (detalhe["DS_CARGO"].str.upper() == candidatura.cargo.upper())
     ]
-    coluna_origem = {"NR_ZONA": "NR_ZONA", "NR_SECAO": "NR_SECAO"}.get(nivel)
+    coluna_origem = None
+    if nivel == "NR_ZONA":
+        coluna_origem = "NR_ZONA"
+    elif nivel == "NR_SECAO_COMPOSTA":
+        # NR_SECAO sozinho reinicia a numeracao a cada zona - usa a mesma
+        # coluna composta (zona+secao) do lado do candidato, senao o merge
+        # abaixo (left_on=nivel) nunca encontraria correspondencia.
+        detalhe_mun = detalhe_mun.assign(NR_SECAO_COMPOSTA=secao_composta(detalhe_mun))
+        coluna_origem = "NR_SECAO_COMPOSTA"
     if coluna_origem is None or coluna_origem not in detalhe_mun.columns:
         territorial["comparecimento"] = None
         territorial["abstencoes"] = None
