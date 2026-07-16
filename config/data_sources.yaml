@@ -114,6 +114,35 @@ ibge:
     ano: 2022
     arquivo_local: "C:/Users/Tales/Downloads/dicionario_de_dados_agregados_por_setores_censitarios_20250417.xlsx"
 
+mte:
+  rais_estabelecimentos:
+    descricao: >
+      RAIS Estabelecimentos - agregado por municipio (vinculos formais
+      ativos/CLT, estabelecimentos ativos). Nivel: MUNICIPIO (a base
+      original tem CNAE por estabelecimento, mas nao tem distrito/bairro
+      fora de SP capital - por isso o agregado usado aqui e municipal,
+      mostrado como contexto economico, nao como variavel de regressao
+      territorial dentro do municipio).
+    fonte: "Ministerio do Trabalho e Emprego - RAIS (microdados nao identificados, dados publicos)"
+    ano: 2023
+    arquivo_local: "data/raw/rais_municipio_2023_SP.parquet"
+    arquivo_bruto_estabelecimento: "data/raw/rais_estabelecimentos_SP.parquet"
+    url_padrao: "ftp://ftp.mtps.gov.br/pdet/microdados/RAIS/2023/RAIS_ESTAB_PUB.7z"
+    observacao: >
+      Codigo de municipio da RAIS e o codigo IBGE de 7 digitos SEM o
+      digito verificador final (ex.: Sao Paulo capital = 3550308 (IBGE) ->
+      355030 (RAIS)). Conversao feita em src/economic_analysis.py.
+
+  caged:
+    descricao: >
+      Novo CAGED - saldo de admissoes/desligamentos formais, consolidado
+      para o ano de 2024 (12 meses), agregado por municipio. Mesmo nivel
+      de granularidade (municipio) e mesma ressalva da RAIS Estabelecimentos.
+    fonte: "Ministerio do Trabalho e Emprego - Novo CAGED (dados publicos, movimentacao nao identificada)"
+    ano: 2024
+    arquivo_local: "data/raw/caged_saldo_2024_SP.parquet"
+    url_padrao: "ftp://ftp.mtps.gov.br/pdet/microdados/NOVO%20CAGED/2024/{mes}/CAGEDMOV{mes}.7z"
+
 # Familias de variaveis explicitamente EXCLUIDAS do uso automatico (secao 4 do
 # briefing): variaveis genericas de caracteristicas do domicilio (dom1/dom2/dom3)
 # nao possuem identificacao clara suficiente para uso automatico.
@@ -136,3 +165,5 @@ pacote_cloud:
     - "cor_raca_setores_SP.parquet"
     - "alfabetizacao_setores_SP.parquet"
     - "renda_setores_SP.parquet"
+    - "rais_municipio_2023_SP.parquet"
+    - "caged_saldo_2024_SP.parquet"

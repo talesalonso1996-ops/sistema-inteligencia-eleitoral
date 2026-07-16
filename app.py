@@ -33,6 +33,7 @@ from src.competitor_analysis import (
 )
 from src.correlation_analysis import correlacoes_com_votos
 from src.demographic_analysis import perfil_demografico_do_territorio, perfil_demografico_por_setor
+from src.economic_analysis import carregar_perfil_economico_municipio
 from src.electoral_metrics import (
     desempenho_territorial,
     enriquecer_com_comparecimento_abstencao,
@@ -311,6 +312,28 @@ if secao == "Visao Geral":
 
     with st.container(border=True):
         st.plotly_chart(charts.grafico_pizza_votos_validos(rg), use_container_width=True)
+
+    perfil_economico = carregar_perfil_economico_municipio(candidatura)
+    with st.container(border=True):
+        st.subheader("Contexto economico do municipio (RAIS + CAGED)")
+        _explicacao(
+            "RAIS Estabelecimentos e CAGED tem granularidade de MUNICIPIO (nao de "
+            "distrito/zona) - por isso aparecem aqui como contexto do municipio como um "
+            "todo, nao como variavel comparada entre territorios (isso fica nas secoes "
+            "Estatistica Avancada/Territorio, que usam dados do Censo por setor)."
+        )
+        if not perfil_economico.disponivel:
+            st.info("Dados de RAIS/CAGED indisponiveis para este municipio.")
+        else:
+            ce1, ce2, ce3 = st.columns(3)
+            _kpi(ce1, "Vinculos formais ativos (RAIS 2023)", _fmt(perfil_economico.vinculos_ativos_total))
+            _kpi(ce2, "Estabelecimentos ativos (RAIS 2023)", _fmt(perfil_economico.estabelecimentos_ativos))
+            _kpi(
+                ce3, "Saldo de empregos formais (CAGED 2024)",
+                f"{perfil_economico.saldo_caged_2024:+,}".replace(",", "."),
+                tom={"crescimento": "bom", "retracao": "ruim"}.get(perfil_economico.tendencia, "neutro"),
+            )
+            st.plotly_chart(charts.grafico_perfil_economico_municipio(perfil_economico), use_container_width=True)
 
 # ============================================================ Concorrencia
 elif secao == "Concorrencia":
@@ -693,6 +716,7 @@ elif secao == "Abordagem de Maslow":
 elif secao == "Relatorio":
     st.write("Gere o relatorio executivo ou exporte os dados desta candidatura.")
     nivel_relatorio = st.session_state.get("nivel_territorial", "NR_ZONA")
+    perfil_economico_rel = carregar_perfil_economico_municipio(candidatura)
 
     limitacoes: list[str] = []
     bairros_agg_rel = None
@@ -754,6 +778,8 @@ elif secao == "Relatorio":
             resultado_maslow_rel.tiers_mapeados, resultado_maslow_rel.tiers_sem_proxy,
             resultado_maslow_rel.ordem_tiers,
         )
+    if perfil_economico_rel.disponivel:
+        figuras["Perfil economico do municipio (RAIS/CAGED)"] = charts.grafico_perfil_economico_municipio(perfil_economico_rel)
 
     dados_relatorio = DadosRelatorio(
         candidatura=candidatura, resultado_geral=rg, ranking=ranking,
@@ -761,7 +787,7 @@ elif secao == "Relatorio":
         limitacoes=limitacoes, figuras=figuras,
         regressao_logistica=modelo_log_rel, clusters_narrativa=narrativa_rel,
         delta_rivais=delta_rel, bairros_potencial=potencial_rel, rivais_similaridade=rivais_sim_rel,
-        maslow=resultado_maslow_rel,
+        maslow=resultado_maslow_rel, perfil_economico=perfil_economico_rel,
     )
 
     col1, col2, col3 = st.columns(3)
@@ -788,6 +814,8 @@ elif secao == "Relatorio":
             planilhas["Bairros_Potencial"] = potencial_rel
         if modelo_log_rel is not None:
             planilhas["Regressao_Logistica"] = modelo_log_rel.coeficientes
+        if perfil_economico_rel.disponivel:
+            planilhas["Perfil_Economico_Municipio"] = pd.DataFrame([vars(perfil_economico_rel)])
         if resultado_maslow_rel is not None and resultado_maslow_rel.fonte_efeito != "indisponivel":
             planilhas["Maslow_Tiers"] = resultado_maslow_rel.tiers_mapeados
             planilhas["Maslow_Sem_Proxy"] = resultado_maslow_rel.tiers_sem_proxy

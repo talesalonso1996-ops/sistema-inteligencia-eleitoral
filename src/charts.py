@@ -291,6 +291,26 @@ def grafico_bairros_potencial(bairros_potencial: pd.DataFrame, coluna_territorio
     return _aplicar_layout(fig, "Territorios com maior potencial de crescimento", altura=max(350, n * 32))
 
 
+def grafico_perfil_economico_municipio(perfil) -> go.Figure:
+    """Admissoes x desligamentos formais do municipio em 2024 (CAGED) -
+    contexto economico do municipio (nivel municipal, nao territorial -
+    ver limitacoes em economic_analysis.PerfilEconomicoMunicipio)."""
+    cores_tendencia = {"crescimento": "#0ca30c", "estavel": "#eda100", "retracao": "#d03b3b"}
+    cor = cores_tendencia.get(perfil.tendencia, "#8a92a3")
+    fig = go.Figure(go.Bar(
+        x=["Admissoes 2024", "Desligamentos 2024"],
+        y=[perfil.admissoes_2024, perfil.desligamentos_2024],
+        marker_color=[COR_CANDIDATO, "#5b6270"],
+        text=[perfil.admissoes_2024, perfil.desligamentos_2024], textposition="outside",
+    ))
+    fig.add_annotation(
+        text=f"Saldo: {perfil.saldo_caged_2024:+,}".replace(",", ".") + f" ({perfil.tendencia})",
+        x=0.5, y=1.12, xref="paper", yref="paper", showarrow=False,
+        font=dict(color=cor, size=14),
+    )
+    return _aplicar_layout(fig, "Movimentacao de empregos formais (CAGED, municipio, 2024)", altura=380)
+
+
 def grafico_pizza_votos_validos(rg) -> go.Figure:
     """Pizza simples: participacao do candidato nos votos validos da
     disputa vs. o restante."""

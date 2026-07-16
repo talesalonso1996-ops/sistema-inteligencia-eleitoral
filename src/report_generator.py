@@ -46,6 +46,7 @@ class DadosRelatorio:
     bairros_potencial: pd.DataFrame | None = None
     rivais_similaridade: pd.DataFrame | None = None
     maslow: object | None = None  # ResultadoMaslow (src/maslow_analysis.py)
+    perfil_economico: object | None = None  # PerfilEconomicoMunicipio (src/economic_analysis.py)
 
 
 def _formatar_numero(valor) -> str:
@@ -154,6 +155,20 @@ def gerar_relatorio_html(dados: DadosRelatorio) -> str:
   {sem_proxy_html}
 """
 
+    secao_economico = ""
+    if dados.perfil_economico is not None and dados.perfil_economico.disponivel:
+        pe = dados.perfil_economico
+        saldo_fmt = f"{pe.saldo_caged_2024:+,}".replace(",", ".")
+        secao_economico = f"""
+  <h2>Contexto economico do municipio (RAIS + CAGED)</h2>
+  <p><i>{pe.limitacoes}</i></p>
+  <div class="kpis">
+    <div class="kpi"><div class="valor">{_formatar_numero(pe.vinculos_ativos_total)}</div><div class="rotulo">Vinculos formais ativos (RAIS 2023)</div></div>
+    <div class="kpi"><div class="valor">{_formatar_numero(pe.estabelecimentos_ativos)}</div><div class="rotulo">Estabelecimentos ativos (RAIS 2023)</div></div>
+    <div class="kpi"><div class="valor">{saldo_fmt}</div><div class="rotulo">Saldo de empregos formais (CAGED 2024) - {pe.tendencia}</div></div>
+  </div>
+"""
+
     return f"""<!doctype html>
 <html lang="pt-BR"><head><meta charset="utf-8">
 <title>Relatorio Executivo - {c.nome_urna}</title>
@@ -204,6 +219,8 @@ def gerar_relatorio_html(dados: DadosRelatorio) -> str:
   {secao_potencial}
 
   {secao_maslow}
+
+  {secao_economico}
 
   <h2>Graficos</h2>
   {graficos_html}
@@ -339,6 +356,21 @@ def gerar_relatorio_pdf(dados: DadosRelatorio, caminho: str | Path) -> Path:
             for frase in m.narrativa:
                 elementos += [Paragraph(f"- {frase}", styles["Normal"])]
             elementos += [Spacer(1, 12)]
+
+    if dados.perfil_economico is not None and dados.perfil_economico.disponivel:
+        pe = dados.perfil_economico
+        saldo_fmt = f"{pe.saldo_caged_2024:+,}".replace(",", ".")
+        elementos += [
+            Paragraph("Contexto economico do municipio (RAIS + CAGED)", secao_style),
+            Paragraph(pe.limitacoes, styles["Normal"]),
+            Paragraph(
+                f"Vinculos formais ativos: {_formatar_numero(pe.vinculos_ativos_total)} | "
+                f"Estabelecimentos ativos: {_formatar_numero(pe.estabelecimentos_ativos)} | "
+                f"Saldo CAGED 2024: {saldo_fmt} ({pe.tendencia})",
+                styles["Normal"],
+            ),
+            Spacer(1, 12),
+        ]
 
     if dados.limitacoes:
         elementos += [Paragraph("Limitacoes metodologicas", secao_style)]
