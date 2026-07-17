@@ -63,7 +63,7 @@ def converter_eleitorado_local_nacional() -> None:
     con.execute(f"""
         COPY (
             SELECT SG_UF, CD_MUNICIPIO, NM_MUNICIPIO, NR_ZONA, NR_SECAO, NR_LOCAL_VOTACAO,
-                   NM_LOCAL_VOTACAO, NM_BAIRRO, NR_LATITUDE, NR_LONGITUDE
+                   NM_LOCAL_VOTACAO, NM_BAIRRO, NR_CEP, NR_LATITUDE, NR_LONGITUDE
             FROM read_csv('{origem}', delim=';', header=true, quote='"',
                 encoding='latin-1', ignore_errors=true)
         ) TO '{destino.as_posix()}' (FORMAT PARQUET, COMPRESSION ZSTD)

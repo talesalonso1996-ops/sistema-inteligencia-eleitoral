@@ -1,5 +1,9 @@
+import geopandas as gpd
+import pandas as pd
 import pytest
+import shapely
 
+import src.geographic_analysis as geo
 from src.candidate_finder import votos_da_candidatura
 from src.geographic_analysis import (
     agregar_votos_por_bairro,
@@ -81,3 +85,59 @@ def test_juntar_votos_com_coordenadas_secao_preserva_votos_apos_join_espacial(ca
     # secoes do mesmo predio devem compartilhar o mesmo setor censitario
     grupos = enriquecido.dropna(subset=["CD_SETOR"]).groupby("local_votacao_id")["CD_SETOR"].nunique()
     assert (grupos == 1).all()
+
+
+def _gdf_sintetico(n: int, cep: str | None = "74000000") -> gpd.GeoDataFrame:
+    return gpd.GeoDataFrame(
+        {
+            "votos_candidato": [10] * n,
+            "cep": [cep] * n,
+            "NM_BAIRRO_IBGE": [None] * n,
+        },
+        geometry=[shapely.Point(-49.25 + i * 0.001, -16.68) for i in range(n)],
+        crs="EPSG:4674",
+    )
+
+
+def test_preencher_bairro_via_cep_usa_ceplookup_mockado(monkeypatch):
+    gdf = _gdf_sintetico(3)
+    monkeypatch.setattr(
+        geo, "bairros_por_ceps",
+        lambda ceps, max_novas_consultas=None: {c: "Setor Central" for c in ceps},
+    )
+
+    recuperados, limite_excedido = geo._preencher_bairro_via_cep(gdf, pd.Series([True] * 3))
+
+    assert recuperados == 3
+    assert limite_excedido is False
+    assert (gdf["NM_BAIRRO_IBGE"] == "Setor Central").all()
+
+
+def test_preencher_bairro_via_cep_respeita_limite_maximo(monkeypatch):
+    """bairros_por_ceps (mockado aqui) e quem de fato respeita
+    max_novas_consultas - simula isso retornando so os 2 primeiros CEPs,
+    como a implementacao real faria com CEPs ainda nao cacheados."""
+    chamadas = {"max_novas_consultas": None}
+
+    def _fake_bairros_por_ceps(ceps, max_novas_consultas=None):
+        chamadas["max_novas_consultas"] = max_novas_consultas
+        limite = max_novas_consultas if max_novas_consultas is not None else len(ceps)
+        return {c: "Bairro Qualquer" for c in ceps[:limite]}
+
+    monkeypatch.setattr(geo, "bairros_por_ceps", _fake_bairros_por_ceps)
+    monkeypatch.setattr(geo, "_MAX_CEPS_POR_CONSULTA", 2)
+
+    gdf = gpd.GeoDataFrame(
+        {
+            "votos_candidato": [10, 10, 10],
+            "cep": ["74000001", "74000002", "74000003"],  # 3 CEPs distintos > limite de 2
+            "NM_BAIRRO_IBGE": [None, None, None],
+        },
+        geometry=[shapely.Point(-49.25, -16.68)] * 3,
+        crs="EPSG:4674",
+    )
+    recuperados, limite_excedido = geo._preencher_bairro_via_cep(gdf, pd.Series([True, True, True]))
+
+    assert chamadas["max_novas_consultas"] == 2
+    assert recuperados == 2
+    assert limite_excedido is True

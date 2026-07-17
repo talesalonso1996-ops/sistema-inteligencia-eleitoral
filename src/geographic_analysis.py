@@ -24,6 +24,7 @@ import geopandas as gpd
 import pandas as pd
 
 from .candidate_finder import Candidatura
+from .cep_lookup import bairros_por_ceps
 from .uf_data_bootstrap import caminho_malha, garantir_malha_uf
 from .utils import cache_key, crs_metrico_utm, data_sources, get_logger, read_cache, resolve_path, write_cache
 
@@ -73,8 +74,12 @@ def carregar_coordenadas_locais(candidatura: Candidatura) -> pd.DataFrame:
     funcionar no mesmo predio/local, todas com a mesma coordenada) -
     agregamos aqui para uma linha por (zona, local de votacao), senao um
     local com N secoes apareceria N vezes nas etapas seguintes (inflando
-    artificialmente contagens de votos por bairro/territorio)."""
-    key = cache_key("coordenadas_locais", candidatura.codigo_municipio_tse)
+    artificialmente contagens de votos por bairro/territorio).
+
+    Tambem traz `cep` (NR_CEP, oficial do TSE) - usado como fallback para
+    descobrir o bairro via consulta de CEP quando o municipio nao tem
+    malha de bairro do IBGE (ver src/cep_lookup.py)."""
+    key = cache_key("coordenadas_locais_v2", candidatura.codigo_municipio_tse)
     cached = read_cache("geographic_analysis", key)
     if cached is not None:
         return cached
@@ -94,6 +99,7 @@ def carregar_coordenadas_locais(candidatura: Candidatura) -> pd.DataFrame:
             NR_ZONA, NR_LOCAL_VOTACAO,
             ANY_VALUE(NM_LOCAL_VOTACAO) AS NM_LOCAL_VOTACAO,
             ANY_VALUE(NM_BAIRRO) AS NM_BAIRRO,
+            ANY_VALUE(NR_CEP) AS cep,
             ANY_VALUE(TRY_CAST(NR_LATITUDE AS DOUBLE)) AS latitude,
             ANY_VALUE(TRY_CAST(NR_LONGITUDE AS DOUBLE)) AS longitude
         FROM {origem}
@@ -256,6 +262,35 @@ def _sjoin_within_com_fallback_proximo(
     return unido
 
 
+_MAX_CEPS_POR_CONSULTA = 300  # limite de consultas ViaCEP (servico externo, sequencial) por chamada
+_MIN_DISTRITOS_PARA_PULAR_CEP = 10  # distritos suficientes para dispensar o fallback via CEP
+
+
+def _preencher_bairro_via_cep(gdf_pontos: gpd.GeoDataFrame, sem_bairro: pd.Series) -> tuple[int, bool]:
+    """Para locais sem bairro atribuido pelo join espacial, tenta resolver
+    via CEP (oficial do TSE) consultando o ViaCEP - ver cep_lookup.py.
+    Preenche NM_BAIRRO_IBGE in-place para os que forem resolvidos. Retorna
+    (quantos locais foram recuperados, se algum CEP ficou de fora por
+    exceder o limite de consultas NOVAS por chamada - CEPs ja cacheados de
+    analises anteriores nao contam para esse limite, entao nao trava a
+    analise so por o municipio ter muitos locais, apenas quando ha muitos
+    CEPs REALMENTE novos de uma vez)."""
+    ceps_a_consultar = gdf_pontos.loc[sem_bairro, "cep"].dropna().unique().tolist()
+    if not ceps_a_consultar:
+        return 0, False
+
+    bairro_por_cep = bairros_por_ceps(ceps_a_consultar, max_novas_consultas=_MAX_CEPS_POR_CONSULTA)
+    ceps_validos = [c for c in ceps_a_consultar if len("".join(ch for ch in str(c) if ch.isdigit())) == 8]
+    limite_excedido = len(bairro_por_cep) < len(ceps_validos)
+    if not any(bairro_por_cep.values()):
+        return 0, limite_excedido
+
+    gdf_pontos["NM_BAIRRO_IBGE"] = gdf_pontos["NM_BAIRRO_IBGE"].astype(object)
+    mapeado = gdf_pontos.loc[sem_bairro, "cep"].map(bairro_por_cep)
+    gdf_pontos.loc[sem_bairro, "NM_BAIRRO_IBGE"] = mapeado
+    return int(mapeado.notna().sum()), limite_excedido
+
+
 def atribuir_setor_e_bairro(
     pontos: pd.DataFrame, candidatura: Candidatura
 ) -> tuple[pd.DataFrame, list[str]]:
@@ -300,16 +335,46 @@ def atribuir_setor_e_bairro(
         bairros_renomeado = bairros.rename(columns={"NM_BAIRRO": "NM_BAIRRO_IBGE"})
         gdf_pontos = _sjoin_within_com_fallback_proximo(gdf_pontos, bairros_renomeado, ["NM_BAIRRO_IBGE"])
     else:
+        gdf_pontos["NM_BAIRRO_IBGE"] = None
+
+    # So vale a pena consultar CEP quando o distrito (fallback ja existente,
+    # sem custo de rede) NAO da diferenciacao real - ex.: Goiania tem so 2
+    # distritos para o municipio inteiro (praticamente tao inutil quanto 1
+    # para fins de analise territorial), mas a capital de SP ja tem 96
+    # distritos reais (nao precisa de CEP, e evita centenas/milhares de
+    # consultas sequenciais a um servico externo so para reproduzir o que o
+    # distrito ja da). _MIN_DISTRITOS_PARA_PULAR_CEP e uma regra pratica:
+    # poucos distritos (ate 9) equivalem, na pratica, a nenhuma
+    # diferenciacao territorial.
+    distritos_distintos = gdf_pontos["NM_DIST"].nunique() if "NM_DIST" in gdf_pontos.columns else 0
+    sem_bairro = gdf_pontos["NM_BAIRRO_IBGE"].isna()
+    if sem_bairro.any() and "cep" in gdf_pontos.columns and distritos_distintos < _MIN_DISTRITOS_PARA_PULAR_CEP:
+        recuperados_cep, limite_excedido = _preencher_bairro_via_cep(gdf_pontos, sem_bairro)
+        if recuperados_cep:
+            avisos.append(
+                f"{recuperados_cep} locais de votacao sem bairro na malha oficial do IBGE tiveram "
+                "o bairro resolvido via consulta de CEP (ViaCEP - servico de terceiros, nao e fonte "
+                "oficial de governo como TSE/IBGE)."
+            )
+        if limite_excedido:
+            avisos.append(
+                "Numero de CEPs distintos sem bairro acima do limite por analise - fallback via CEP "
+                "nao aplicado para todos os locais (usa apenas distrito/setor censitario)."
+            )
+        sem_bairro = gdf_pontos["NM_BAIRRO_IBGE"].isna()
+
+    if bairros is None:
         # Alguns municipios (ex.: capital de SP) nao possuem "bairro" na
         # malha oficial CD2022 - usa "distrito" (NM_DIST, ja atribuido via
         # setores) como nivel territorial alternativo, mantendo o dado real
-        # do IBGE em vez de reportar apenas uma limitacao.
+        # do IBGE em vez de reportar apenas uma limitacao. Locais ja
+        # resolvidos via CEP acima nao entram neste aviso.
         avisos.append(
             f"Malha de bairros sem poligonos oficiais para o municipio "
             f"'{candidatura.municipio}' - usando 'distrito' (IBGE) como nivel "
-            "territorial alternativo, alem do bairro auto-declarado pelo TSE."
+            "territorial alternativo (ou bairro via CEP, quando disponivel), "
+            "alem do bairro auto-declarado pelo TSE."
         )
-        gdf_pontos["NM_BAIRRO_IBGE"] = None
 
     resultado = pd.DataFrame(gdf_pontos.drop(columns="geometry"))
     if not sem_coordenada.empty:
