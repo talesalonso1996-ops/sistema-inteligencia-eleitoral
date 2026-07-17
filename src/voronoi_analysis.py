@@ -11,7 +11,7 @@ import geopandas as gpd
 import pandas as pd
 import shapely
 
-from .utils import get_logger
+from .utils import crs_metrico_utm, get_logger
 
 logger = get_logger(__name__)
 
@@ -20,17 +20,6 @@ def _fronteira_municipio(malha: gpd.GeoDataFrame) -> shapely.Geometry:
     """Uniao de todos os poligonos da malha (setores ou bairros) do
     municipio - usado para recortar o diagrama de Voronoi nos limites reais."""
     return malha.union_all()
-
-
-def _crs_metrico_utm(longitude_media: float) -> str:
-    """EPSG SIRGAS 2000 / UTM (zona sul) mais adequado para a longitude
-    media dos pontos. O Brasil cobre varias zonas UTM (17S a 25S); usar uma
-    zona fixa (ex.: 23S, a de Sao Paulo) para municipios de outras regioes
-    do pais introduz distorcao real de area/distancia - por isso a zona e
-    calculada dinamicamente a partir da longitude, em vez de fixa."""
-    zona = int((longitude_media + 180) // 6) + 1
-    zona = min(max(zona, 17), 25)  # zonas UTM que cobrem o territorio brasileiro
-    return f"EPSG:{31960 + zona}"
 
 
 def gerar_voronoi(
@@ -54,7 +43,7 @@ def gerar_voronoi(
         logger.warning("Apenas %s locais com coordenada unica - Voronoi nao gerado.", len(validos))
         return None
 
-    crs_metros = _crs_metrico_utm(validos["longitude"].mean())
+    crs_metros = crs_metrico_utm(validos["longitude"].mean())
     gdf_pontos = gpd.GeoDataFrame(
         validos,
         geometry=gpd.points_from_xy(validos["longitude"], validos["latitude"]),

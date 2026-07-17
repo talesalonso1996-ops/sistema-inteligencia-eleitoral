@@ -1,6 +1,7 @@
+import pandas as pd
 from conftest import VARIAVEIS_DEMOGRAFICAS
 
-from src.regression_models import regressao_logistica_bom_desempenho
+from src.regression_models import regressao_linear_votos, regressao_logistica_bom_desempenho
 
 
 def test_regressao_logistica_pseudo_r2_entre_0_e_1(base_territorio_sp):
@@ -33,6 +34,44 @@ def test_regressao_logistica_classes_aproximadamente_balanceadas(base_territorio
     )
     total = modelo.n_positivos + modelo.n_negativos
     assert abs(modelo.n_positivos - modelo.n_negativos) <= max(2, total * 0.1)
+
+
+def test_regressao_logistica_cluster_ativa_erro_padrao_robusto(base_territorio_sp):
+    """Quando coluna_cluster e informada (secoes de um mesmo local de
+    votacao compartilham perfil demografico - nao sao independentes), o
+    modelo deve sinalizar erro_padrao_cluster=True e continuar produzindo
+    coeficientes validos."""
+    base = base_territorio_sp.copy()
+    # simula 2 secoes por "predio" repetindo cada linha (mesmo perfil
+    # demografico, cluster identifica o par duplicado)
+    base["predio_id"] = base.index
+    duplicado = pd.concat([base, base], ignore_index=True)
+    modelo, issues = regressao_logistica_bom_desempenho(
+        duplicado, "pct_votos_validos_territorio", VARIAVEIS_DEMOGRAFICAS,
+        coluna_cluster="predio_id",
+    )
+    assert modelo is not None, f"modelo nao ajustado: {issues}"
+    assert modelo.erro_padrao_cluster is True
+    assert "robusto a cluster" in modelo.limitacoes
+
+
+def test_regressao_logistica_sem_cluster_mantem_comportamento_padrao(base_territorio_sp):
+    modelo, _ = regressao_logistica_bom_desempenho(
+        base_territorio_sp, "pct_votos_validos_territorio", VARIAVEIS_DEMOGRAFICAS
+    )
+    assert modelo.erro_padrao_cluster is False
+    assert "robusto a cluster" not in modelo.limitacoes
+
+
+def test_regressao_linear_cluster_ativa_erro_padrao_robusto(base_territorio_sp):
+    base = base_territorio_sp.copy()
+    base["predio_id"] = base.index
+    duplicado = pd.concat([base, base], ignore_index=True)
+    modelo, issues = regressao_linear_votos(
+        duplicado, "votos_candidato", VARIAVEIS_DEMOGRAFICAS, coluna_cluster="predio_id",
+    )
+    assert modelo is not None, f"modelo nao ajustado: {issues}"
+    assert modelo.erro_padrao_cluster is True
 
 
 def test_regressao_logistica_amostra_insuficiente_retorna_none():

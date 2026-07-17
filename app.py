@@ -48,6 +48,7 @@ from src.geographic_analysis import (
     carregar_fronteira_municipio,
     carregar_malha,
     juntar_votos_com_coordenadas,
+    juntar_votos_com_coordenadas_secao,
     total_votos_validos_por_territorio,
     uf_tem_malha_completa,
 )
@@ -75,14 +76,22 @@ if not _dados_ok:
     )
     st.stop()
 
-_NIVEL_TERRITORIO_DEMOGRAFICO = "local_votacao_id"
+_NIVEL_TERRITORIO_DEMOGRAFICO = "secao_id"
 # Nivel territorial usado nas analises estatisticas (regressao/clusterizacao/
-# Maslow). Local de votacao (nao distrito/bairro) - a maioria dos municipios
-# brasileiros tem poucos distritos oficiais (as vezes so 1), o que deixa
-# regressao/clusterizacao sem amostra suficiente; local de votacao existe
-# em quantidade suficiente em qualquer municipio. O mapa coropletico da aba
-# Geografia continua por distrito/bairro (nivel geografico com poligono
-# desenhavel - local de votacao e ponto, nao poligono).
+# Maslow): SECAO eleitoral (urna), nao local de votacao (predio) nem
+# distrito/bairro. Um local de votacao tem em media varias secoes - usar
+# secao como unidade multiplica o numero de observacoes disponiveis, essencial
+# em municipios pequenos (que podem ter poucos predios de votacao, mas ainda
+# assim varias secoes rateadas entre eles). Secoes do mesmo predio
+# compartilham a mesma coordenada/perfil demografico (nao sao observacoes
+# geograficas independentes) - por isso a regressao usa erro-padrao robusto
+# a cluster, agrupado por `local_votacao_id` (o predio fisico, ver
+# _COLUNA_CLUSTER_REGRESSAO abaixo), o que evita superestimar a precisao dos
+# coeficientes. O mapa coropletico e o Voronoi da aba Geografia continuam por
+# predio/bairro/distrito (local_votacao_id) - secoes do mesmo predio tem a
+# MESMA coordenada, entao nao fariam sentido como pontos/observacoes
+# separadas num mapa.
+_COLUNA_CLUSTER_REGRESSAO = "local_votacao_id"
 VARIAVEIS_DEMOGRAFICAS = indicators_config()["clustering"]["variaveis_demograficas"]
 K_CLUSTERS = indicators_config()["clustering"]["k_fixo"]
 
@@ -207,6 +216,17 @@ def _carregar_geografia(numero, municipio_tse, cargo, ano, turno, _candidatura: 
 
 
 @st.cache_data(show_spinner=False)
+def _carregar_geografia_secao(numero, municipio_tse, cargo, ano, turno, _candidatura: Candidatura, _vc: pd.DataFrame):
+    """Como _carregar_geografia, mas por SECAO eleitoral (nao por predio) -
+    unidade de observacao das analises estatisticas (regressao/
+    clusterizacao/Maslow). Ver _NIVEL_TERRITORIO_DEMOGRAFICO."""
+    coords = carregar_coordenadas_locais(_candidatura)
+    pontos = juntar_votos_com_coordenadas_secao(_vc, coords)
+    enriquecido, avisos = atribuir_setor_e_bairro(pontos, _candidatura)
+    return pontos, enriquecido, avisos
+
+
+@st.cache_data(show_spinner=False)
 def _carregar_demografia(
     numero, municipio_tse, cargo, ano, turno, _enriquecido: pd.DataFrame, _vd: pd.DataFrame,
 ):
@@ -216,7 +236,14 @@ def _carregar_demografia(
         return pd.DataFrame(), pd.DataFrame()
     perfil_setor = perfil_demografico_por_setor(setores)
     perfil_territorio = perfil_demografico_do_territorio(_enriquecido, perfil_setor, nivel)
-    votos_territorio = _enriquecido.groupby(nivel, as_index=False)["votos_candidato"].sum()
+    # "first" para local_votacao_id: todo secao_id pertence a exatamente um
+    # local_votacao_id (predio), entao nao ha ambiguidade - preservado aqui
+    # para uso como coluna de cluster na regressao (secoes do mesmo predio
+    # nao sao observacoes independentes, ver _COLUNA_CLUSTER_REGRESSAO).
+    agregacoes = {"votos_candidato": ("votos_candidato", "sum")}
+    if "local_votacao_id" in _enriquecido.columns and nivel != "local_votacao_id":
+        agregacoes["local_votacao_id"] = ("local_votacao_id", "first")
+    votos_territorio = _enriquecido.groupby(nivel, as_index=False).agg(**agregacoes)
     total_validos = total_votos_validos_por_territorio(_vd, _enriquecido, nivel)
     base = (
         votos_territorio.merge(perfil_territorio, on=nivel, how="inner")
@@ -285,6 +312,13 @@ st.session_state.setdefault("nivel_territorial", "NR_ZONA")
 
 def _geo():
     return _carregar_geografia(
+        candidatura.numero, candidatura.codigo_municipio_tse, candidatura.cargo,
+        candidatura.ano_eleicao, candidatura.turno, candidatura, vc,
+    )
+
+
+def _geo_secao():
+    return _carregar_geografia_secao(
         candidatura.numero, candidatura.codigo_municipio_tse, candidatura.cargo,
         candidatura.ano_eleicao, candidatura.turno, candidatura, vc,
     )
@@ -517,17 +551,17 @@ elif secao == "Demografia":
         st.info(f"Malha geografica nao configurada para a UF '{candidatura.uf}'.")
     else:
         with st.spinner("Cruzando com o Censo 2022 (IBGE)..."):
-            pontos, enriquecido, _ = _geo()
-            perfil_setor, base_territorio = _demo(enriquecido)
+            _, enriquecido_secao, _ = _geo_secao()
+            perfil_setor, base_territorio = _demo(enriquecido_secao)
 
         if base_territorio.empty:
             st.info("Nao foi possivel montar o perfil demografico por territorio.")
         else:
             _explicacao(
-                "Perfil demografico por distrito, ponderado pelos votos do candidato em cada "
-                "setor censitario (fonte: Censo Demografico 2022, IBGE). Aproximacao: assume "
-                "que o eleitorado de um local de votacao reflete o setor onde ele fica "
-                "fisicamente localizado."
+                "Perfil demografico por secao eleitoral, a partir do setor censitario onde o "
+                "local de votacao correspondente fica fisicamente localizado (fonte: Censo "
+                "Demografico 2022, IBGE). Secoes do mesmo local de votacao compartilham o "
+                "mesmo perfil (mesma coordenada) - variam apenas nos votos do candidato."
             )
             with st.container(border=True):
                 st.dataframe(
@@ -552,8 +586,8 @@ elif secao == "Estatistica Avancada":
         st.info(f"Malha geografica nao configurada para a UF '{candidatura.uf}'.")
     else:
         with st.spinner("Calculando correlacoes, regressoes e clusterizacao..."):
-            pontos, enriquecido, _ = _geo()
-            perfil_setor, base_territorio = _demo(enriquecido)
+            _, enriquecido_secao, _ = _geo_secao()
+            perfil_setor, base_territorio = _demo(enriquecido_secao)
 
         if base_territorio.empty:
             st.info("Dados insuficientes para analise estatistica territorial.")
@@ -576,7 +610,10 @@ elif secao == "Estatistica Avancada":
 
             with st.container(border=True):
                 st.subheader("Regressao linear (votos por territorio)")
-                reg, issues_reg = regressao_linear_votos(base_territorio, "votos_candidato", variaveis_disp)
+                reg, issues_reg = regressao_linear_votos(
+                    base_territorio, "votos_candidato", variaveis_disp,
+                    coluna_cluster=_COLUNA_CLUSTER_REGRESSAO,
+                )
                 for issue in issues_reg:
                     st.warning(issue.mensagem)
                 if reg:
@@ -594,7 +631,8 @@ elif secao == "Estatistica Avancada":
                     "caracteristicas demograficas aumentam ou diminuem essa chance (odds ratio)."
                 )
                 modelo_log, issues_log = regressao_logistica_bom_desempenho(
-                    base_territorio, "pct_votos_validos_territorio", variaveis_disp
+                    base_territorio, "pct_votos_validos_territorio", variaveis_disp,
+                    coluna_cluster=_COLUNA_CLUSTER_REGRESSAO,
                 )
                 for issue in issues_log:
                     st.warning(issue.mensagem)
@@ -603,7 +641,7 @@ elif secao == "Estatistica Avancada":
                     _kpi(c1, "Limiar 'boa votacao'", f"{modelo_log.limiar_usado}%")
                     _kpi(c2, "Pseudo-R2 (McFadden)", str(modelo_log.pseudo_r2_mcfadden))
                     _kpi(c3, "Acuracia (na amostra)", f"{modelo_log.acuracia*100:.0f}%")
-                    _kpi(c4, "Territorios (bom/fraco)", f"{modelo_log.n_positivos}/{modelo_log.n_negativos}")
+                    _kpi(c4, "Secoes (boa/fraca votacao)", f"{modelo_log.n_positivos}/{modelo_log.n_negativos}")
                     st.dataframe(modelo_log.coeficientes, use_container_width=True)
                     st.write("**Matriz de confusao** (linhas=real, colunas=previsto)")
                     st.dataframe(modelo_log.matriz_confusao, use_container_width=True)
@@ -651,7 +689,7 @@ elif secao == "Estatistica Avancada":
                     st.dataframe(resultado_clustering.perfil_clusters, use_container_width=True)
 
             with st.container(border=True):
-                st.subheader("Locais de votacao com maior potencial de crescimento")
+                st.subheader("Secoes eleitorais com maior potencial de crescimento")
                 _explicacao(
                     "Combina o quanto o territorio esta abaixo da media de territorios com "
                     "perfil demografico parecido (mesmo cluster) com a probabilidade prevista "
@@ -679,8 +717,8 @@ elif secao == "Abordagem de Maslow":
         st.info(f"Malha geografica nao configurada para a UF '{candidatura.uf}'.")
     else:
         with st.spinner("Recalculando modelos estatisticos para aplicar a lente de Maslow..."):
-            pontos, enriquecido, _ = _geo()
-            perfil_setor, base_territorio = _demo(enriquecido)
+            _, enriquecido_secao, _ = _geo_secao()
+            perfil_setor, base_territorio = _demo(enriquecido_secao)
 
         if base_territorio.empty:
             st.info("Dados insuficientes para aplicar a abordagem de Maslow.")
@@ -697,14 +735,18 @@ elif secao == "Abordagem de Maslow":
             )
 
             modelo_log_m, issues_log_m = regressao_logistica_bom_desempenho(
-                base_territorio, "pct_votos_validos_territorio", variaveis_disp
+                base_territorio, "pct_votos_validos_territorio", variaveis_disp,
+                coluna_cluster=_COLUNA_CLUSTER_REGRESSAO,
             )
             for issue in issues_log_m:
                 st.warning(issue.mensagem)
 
             modelo_lin_m, corr_m = None, None
             if modelo_log_m is None:
-                modelo_lin_m, issues_lin_m = regressao_linear_votos(base_territorio, "votos_candidato", variaveis_disp)
+                modelo_lin_m, issues_lin_m = regressao_linear_votos(
+                    base_territorio, "votos_candidato", variaveis_disp,
+                    coluna_cluster=_COLUNA_CLUSTER_REGRESSAO,
+                )
                 for issue in issues_lin_m:
                     st.warning(issue.mensagem)
                 if modelo_lin_m is None:
@@ -767,12 +809,14 @@ elif secao == "Relatorio":
         pontos, enriquecido, avisos_geo = _geo()
         limitacoes = list(avisos_geo)
         bairros_agg_rel = agregar_votos_por_bairro(enriquecido)
-        _, base_territorio_rel = _demo(enriquecido)
+        _, enriquecido_secao_rel, _ = _geo_secao()
+        _, base_territorio_rel = _demo(enriquecido_secao_rel)
         if not base_territorio_rel.empty:
             variaveis_disp = [v for v in VARIAVEIS_DEMOGRAFICAS if v in base_territorio_rel.columns]
             corr_rel, _ = correlacoes_com_votos(base_territorio_rel, "votos_candidato", variaveis_disp)
             modelo_log_rel, _ = regressao_logistica_bom_desempenho(
-                base_territorio_rel, "pct_votos_validos_territorio", variaveis_disp
+                base_territorio_rel, "pct_votos_validos_territorio", variaveis_disp,
+                coluna_cluster=_COLUNA_CLUSTER_REGRESSAO,
             )
             resultado_clustering_rel, _ = segmentar_territorios(base_territorio_rel, variaveis_disp, k=K_CLUSTERS)
             if resultado_clustering_rel:
@@ -782,7 +826,10 @@ elif secao == "Relatorio":
                 )
             modelo_lin_rel = None
             if modelo_log_rel is None:
-                modelo_lin_rel, _ = regressao_linear_votos(base_territorio_rel, "votos_candidato", variaveis_disp)
+                modelo_lin_rel, _ = regressao_linear_votos(
+                    base_territorio_rel, "votos_candidato", variaveis_disp,
+                    coluna_cluster=_COLUNA_CLUSTER_REGRESSAO,
+                )
             resultado_maslow_rel = gerar_analise_maslow(modelo_log_rel, modelo_lin_rel, corr_rel)
     else:
         limitacoes = [f"Malha geografica nao configurada para a UF '{candidatura.uf}'."]

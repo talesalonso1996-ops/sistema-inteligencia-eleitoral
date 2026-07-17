@@ -25,21 +25,42 @@ class ResultadoRegressao:
     coeficientes: pd.DataFrame  # variavel, coeficiente, erro_padrao, p_valor, significativo
     intercepto: float
     variaveis_utilizadas: list[str]
+    erro_padrao_cluster: bool = False
     limitacoes: str = (
         "Regressao com dados agregados por territorio (ecological regression): "
         "as relacoes encontradas valem para o territorio, nao permitem inferir "
         "comportamento de eleitores individuais (falacia ecologica)."
     )
 
+    def __post_init__(self) -> None:
+        if self.erro_padrao_cluster:
+            self.limitacoes += (
+                " A unidade de observacao e a secao eleitoral (varias por local de "
+                "votacao); secoes do mesmo local compartilham o mesmo perfil "
+                "demografico (mesmo predio/coordenada), entao nao sao amostras "
+                "independentes - o erro-padrao usado e robusto a cluster (agrupado "
+                "por local de votacao), que evita superestimar a precisao dos "
+                "coeficientes nessa situacao."
+            )
+
 
 def regressao_linear_votos(
-    df: pd.DataFrame, coluna_alvo: str, variaveis: list[str]
+    df: pd.DataFrame, coluna_alvo: str, variaveis: list[str], coluna_cluster: str | None = None,
 ) -> tuple[ResultadoRegressao | None, list[DataIssue]]:
     """Regressao OLS (minimos quadrados) do percentual de votos do
     candidato por territorio em funcao das variaveis demograficas
-    informadas. Exige pelo menos 10 observacoes por variavel preditora."""
+    informadas. Exige pelo menos 10 observacoes por variavel preditora.
+
+    `coluna_cluster` (opcional): quando a unidade de observacao e mais fina
+    que o local de votacao (ex.: secao/urna - varias secoes compartilham o
+    mesmo local fisico e portanto o mesmo perfil demografico), informar a
+    coluna que identifica o local fisico para usar erro-padrao robusto a
+    cluster - sem isso, observacoes correlacionadas (mesmo predio)
+    fariam a regressao parecer mais precisa do que realmente e."""
     variaveis_validas = [v for v in variaveis if v in df.columns]
-    dados = df[[coluna_alvo] + variaveis_validas].dropna()
+    tem_cluster = coluna_cluster is not None and coluna_cluster in df.columns
+    colunas = [coluna_alvo] + variaveis_validas + ([coluna_cluster] if tem_cluster else [])
+    dados = df[colunas].dropna(subset=[coluna_alvo] + variaveis_validas)
 
     minimo = _AMOSTRA_MINIMA_POR_VARIAVEL * max(len(variaveis_validas), 1)
     issues = validar_amostra_minima(len(dados), minimo, "regressao_linear_votos")
@@ -48,7 +69,10 @@ def regressao_linear_votos(
 
     x = sm.add_constant(dados[variaveis_validas])
     y = dados[coluna_alvo]
-    modelo = sm.OLS(y, x).fit()
+    if tem_cluster:
+        modelo = sm.OLS(y, x).fit(cov_type="cluster", cov_kwds={"groups": dados[coluna_cluster]})
+    else:
+        modelo = sm.OLS(y, x).fit()
 
     coeficientes = pd.DataFrame(
         {
@@ -68,6 +92,7 @@ def regressao_linear_votos(
         coeficientes=coeficientes,
         intercepto=round(float(modelo.params.get("const", 0.0)), 4),
         variaveis_utilizadas=variaveis_validas,
+        erro_padrao_cluster=tem_cluster,
     )
     return resultado, []
 
@@ -84,6 +109,7 @@ class ResultadoRegressaoLogistica:
     intercepto: float
     interpretacoes: list[str]
     variaveis_utilizadas: list[str]
+    erro_padrao_cluster: bool = False
     limitacoes: str = (
         "Regressao logistica com dados agregados por territorio (ecological "
         "regression): as relacoes encontradas valem para o territorio, nao "
@@ -92,12 +118,24 @@ class ResultadoRegressaoLogistica:
         "(sem separacao treino/teste - amostra pequena nao comporta split)."
     )
 
+    def __post_init__(self) -> None:
+        if self.erro_padrao_cluster:
+            self.limitacoes += (
+                " A unidade de observacao e a secao eleitoral (varias por local de "
+                "votacao); secoes do mesmo local compartilham o mesmo perfil "
+                "demografico (mesmo predio/coordenada), entao nao sao amostras "
+                "independentes - o erro-padrao usado e robusto a cluster (agrupado "
+                "por local de votacao), que evita superestimar a precisao dos "
+                "coeficientes/p-valores nessa situacao."
+            )
+
 
 def regressao_logistica_bom_desempenho(
     df: pd.DataFrame,
     coluna_pct_votos: str,
     variaveis: list[str],
     limiar: float | None = None,
+    coluna_cluster: str | None = None,
 ) -> tuple[ResultadoRegressaoLogistica | None, list[DataIssue]]:
     """Classifica cada territorio como "boa votacao" (1) ou nao (0) e ajusta
     uma regressao logistica contra as variaveis demograficas informadas -
@@ -108,9 +146,15 @@ def regressao_logistica_bom_desempenho(
     `coluna_pct_votos` entre os territorios onde ele concorreu - ou seja,
     mede desempenho acima da propria mediana (equilibra a amostra ~50/50 e
     mede forca relativa do candidato, coerente com a mesma logica usada no
-    indice de performance territorial)."""
+    indice de performance territorial).
+
+    `coluna_cluster` (opcional): ver documentacao equivalente em
+    regressao_linear_votos - usar quando a unidade de observacao e mais
+    fina que o local de votacao (secao/urna)."""
     variaveis_validas = [v for v in variaveis if v in df.columns]
-    dados = df[[coluna_pct_votos] + variaveis_validas].dropna()
+    tem_cluster = coluna_cluster is not None and coluna_cluster in df.columns
+    colunas = [coluna_pct_votos] + variaveis_validas + ([coluna_cluster] if tem_cluster else [])
+    dados = df[colunas].dropna(subset=[coluna_pct_votos] + variaveis_validas)
 
     minimo = _AMOSTRA_MINIMA_POR_VARIAVEL * max(len(variaveis_validas), 1)
     issues = validar_amostra_minima(len(dados), minimo, "regressao_logistica_bom_desempenho")
@@ -133,7 +177,12 @@ def regressao_logistica_bom_desempenho(
 
     x = sm.add_constant(dados[variaveis_validas])
     try:
-        modelo = sm.Logit(alvo, x).fit(disp=0)
+        if tem_cluster:
+            modelo = sm.Logit(alvo, x).fit(
+                disp=0, cov_type="cluster", cov_kwds={"groups": dados[coluna_cluster]}
+            )
+        else:
+            modelo = sm.Logit(alvo, x).fit(disp=0)
     except Exception as exc:  # separacao perfeita ou nao-convergencia
         logger.warning("Regressao logistica nao convergiu: %s", exc)
         return None, [
@@ -193,5 +242,6 @@ def regressao_logistica_bom_desempenho(
         intercepto=round(intercepto, 4),
         interpretacoes=interpretacoes,
         variaveis_utilizadas=variaveis_validas,
+        erro_padrao_cluster=tem_cluster,
     )
     return resultado, []

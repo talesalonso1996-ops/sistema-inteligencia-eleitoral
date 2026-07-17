@@ -25,7 +25,9 @@ import pandas as pd
 
 from .candidate_finder import Candidatura
 from .uf_data_bootstrap import caminho_malha, garantir_malha_uf
-from .utils import cache_key, data_sources, get_logger, read_cache, resolve_path, write_cache
+from .utils import cache_key, crs_metrico_utm, data_sources, get_logger, read_cache, resolve_path, write_cache
+
+_DISTANCIA_MAXIMA_FALLBACK_M = 2000  # limite para o fallback de poligono mais proximo
 
 logger = get_logger(__name__)
 
@@ -108,16 +110,17 @@ def carregar_coordenadas_locais(candidatura: Candidatura) -> pd.DataFrame:
 def juntar_votos_com_coordenadas(
     votos_candidatura: pd.DataFrame, coordenadas: pd.DataFrame
 ) -> pd.DataFrame:
-    """Agrega votos do candidato por local de votacao e junta com as
-    coordenadas correspondentes (chave: NR_ZONA + NR_LOCAL_VOTACAO).
+    """Agrega votos do candidato por local de votacao (predio fisico) e
+    junta com as coordenadas correspondentes (chave: NR_ZONA +
+    NR_LOCAL_VOTACAO). Usado para os MAPAS (Geografia: pontos, coropletico,
+    Voronoi) - a unidade certa ali e o predio (ponto no mapa), nao a secao
+    (varias secoes de um mesmo predio tem a mesma coordenada, entao nao
+    fariam sentido como pontos distintos no mapa).
 
-    Tambem cria `local_votacao_id`: identificador unico e legivel do local
-    de votacao (nome + zona + numero do local). Este e o nivel territorial
-    usado nas analises estatisticas (regressao/clusterizacao/Maslow) em vez
-    de distrito/bairro - a maioria dos municipios brasileiros tem poucos
-    distritos oficiais (as vezes so 1, a sede), o que deixa a amostra
-    pequena demais para qualquer analise; local de votacao existe em
-    quantidade suficiente em qualquer municipio, por menor que seja."""
+    Cria `local_votacao_id`: identificador unico e legivel do local de
+    votacao (nome + zona + numero do local). Para a unidade de observacao
+    da regressao/clusterizacao/Maslow, ver juntar_votos_com_coordenadas_secao
+    (mais granular - por secao, nao por predio)."""
     votos_local = (
         votos_candidatura.groupby(["NR_ZONA", "NR_LOCAL_VOTACAO"], as_index=False)["QT_VOTOS"]
         .sum()
@@ -129,10 +132,47 @@ def juntar_votos_com_coordenadas(
         logger.warning(
             "%s de %s locais de votacao sem coordenada disponivel", sem_coordenada, len(out)
         )
-    nome_local = out["NM_LOCAL_VOTACAO"].fillna("LOCAL SEM NOME").astype(str)
-    out["local_votacao_id"] = (
-        nome_local + " (Zona " + out["NR_ZONA"].astype(str) + ", Local " + out["NR_LOCAL_VOTACAO"].astype(str) + ")"
+    out["local_votacao_id"] = _local_votacao_id(out)
+    return out
+
+
+def _local_votacao_id(df: pd.DataFrame) -> pd.Series:
+    nome_local = df["NM_LOCAL_VOTACAO"].fillna("LOCAL SEM NOME").astype(str)
+    return nome_local + " (Zona " + df["NR_ZONA"].astype(str) + ", Local " + df["NR_LOCAL_VOTACAO"].astype(str) + ")"
+
+
+def juntar_votos_com_coordenadas_secao(
+    votos_candidatura: pd.DataFrame, coordenadas: pd.DataFrame
+) -> pd.DataFrame:
+    """Como juntar_votos_com_coordenadas, mas SEM agregar as secoes de um
+    mesmo local de votacao - cada linha aqui e uma secao eleitoral (urna),
+    nao um predio inteiro. Esta e a unidade de observacao da regressao/
+    clusterizacao/Maslow: um local de votacao tem em media varias secoes,
+    entao usar secao como unidade multiplica o numero de observacoes
+    disponiveis para a analise estatistica - essencial em municipios
+    pequenos, onde o numero de PREDIOS sozinho pode ficar abaixo do minimo
+    recomendado pela regressao (ver src/regression_models.py).
+
+    ATENCAO: todas as secoes de um mesmo predio compartilham a MESMA
+    coordenada e portanto o MESMO perfil demografico do setor censitario -
+    nao sao observacoes geograficas independentes, so o voto de cada secao
+    e realmente distinto. Por isso a regressao usa erro-padrao robusto a
+    cluster, agrupado por `local_votacao_id` (o predio fisico) - sem essa
+    correcao, a precisao dos coeficientes seria superestimada."""
+    votos_secao = (
+        votos_candidatura.groupby(["NR_ZONA", "NR_LOCAL_VOTACAO", "NR_SECAO"], as_index=False)["QT_VOTOS"]
+        .sum()
+        .rename(columns={"QT_VOTOS": "votos_candidato"})
     )
+    out = votos_secao.merge(coordenadas, on=["NR_ZONA", "NR_LOCAL_VOTACAO"], how="left")
+    sem_coordenada = int(out["latitude"].isna().sum())
+    if sem_coordenada:
+        logger.warning(
+            "%s de %s secoes sem coordenada disponivel (local de votacao correspondente sem coordenada)",
+            sem_coordenada, len(out),
+        )
+    out["local_votacao_id"] = _local_votacao_id(out)
+    out["secao_id"] = out["local_votacao_id"] + " - Secao " + out["NR_SECAO"].astype(str)
     return out
 
 
@@ -170,6 +210,52 @@ def carregar_fronteira_municipio(candidatura: Candidatura) -> gpd.GeoDataFrame |
     return malha
 
 
+def _sjoin_within_com_fallback_proximo(
+    gdf_pontos: gpd.GeoDataFrame, malha: gpd.GeoDataFrame, colunas: list[str],
+) -> gpd.GeoDataFrame:
+    """Point-in-polygon (predicate=within); para pontos que nao caem em
+    NENHUM poligono da malha (comum perto de bordas - imprecisao da propria
+    coordenada do local de votacao ou do desenho da malha oficial do IBGE,
+    nao necessariamente um erro), tenta o poligono mais proximo, contanto
+    que a distancia seja pequena (ate `_DISTANCIA_MAXIMA_FALLBACK_M`) - para
+    nao arriscar atribuir um bairro/setor errado a um ponto genuinamente
+    fora do municipio. Retorna "nao identificado" (nao inventa) quando nem
+    o poligono mais proximo estiver dentro dessa distancia."""
+    malha_geo = malha.to_crs(gdf_pontos.crs)
+    unido = gpd.sjoin(
+        gdf_pontos, malha_geo[colunas + ["geometry"]], how="left", predicate="within",
+    ).drop(columns=["index_right"], errors="ignore")
+
+    sem_match = unido[colunas[0]].isna()
+    if not sem_match.any():
+        return unido
+
+    crs_metros = crs_metrico_utm(gdf_pontos.geometry.x.mean())
+    pontos_sem_match = gdf_pontos.loc[sem_match, ["geometry"]].to_crs(crs_metros)
+    malha_metros = malha_geo.to_crs(crs_metros)
+    proximo = gpd.sjoin_nearest(
+        pontos_sem_match, malha_metros[colunas + ["geometry"]],
+        how="left", max_distance=_DISTANCIA_MAXIMA_FALLBACK_M, distance_col="_dist_fallback",
+    )
+    proximo = proximo[~proximo.index.duplicated(keep="first")]  # empate de distancia (raro)
+
+    for col in colunas:
+        # .astype(object) evita erro de tipagem estrita de colunas com
+        # dtype de string do Arrow (pandas >= 2 com backend pyarrow) ao
+        # preencher com os valores recuperados via fallback.
+        unido[col] = unido[col].astype(object)
+        unido.loc[sem_match, col] = unido.loc[sem_match].index.map(proximo[col])
+
+    recuperados = int(proximo[colunas[0]].notna().sum())
+    if recuperados:
+        logger.info(
+            "%s de %s pontos sem match direto no join espacial recuperados via "
+            "poligono mais proximo (ate %.0fm de distancia).",
+            recuperados, int(sem_match.sum()), _DISTANCIA_MAXIMA_FALLBACK_M,
+        )
+    return unido
+
+
 def atribuir_setor_e_bairro(
     pontos: pd.DataFrame, candidatura: Candidatura
 ) -> tuple[pd.DataFrame, list[str]]:
@@ -198,11 +284,9 @@ def atribuir_setor_e_bairro(
 
     setores = carregar_malha("setores", candidatura.municipio, candidatura.uf)
     if setores is not None:
-        setores = setores.to_crs(gdf_pontos.crs)
-        gdf_pontos = gpd.sjoin(
-            gdf_pontos, setores[["CD_SETOR", "CD_BAIRRO", "NM_DIST", "geometry"]],
-            how="left", predicate="within",
-        ).drop(columns=["index_right"], errors="ignore")
+        gdf_pontos = _sjoin_within_com_fallback_proximo(
+            gdf_pontos, setores, ["CD_SETOR", "CD_BAIRRO", "NM_DIST"]
+        )
     else:
         avisos.append(
             f"Malha de setores censitarios sem poligonos para o municipio "
@@ -213,11 +297,8 @@ def atribuir_setor_e_bairro(
 
     bairros = carregar_malha("bairros", candidatura.municipio, candidatura.uf)
     if bairros is not None:
-        bairros = bairros.to_crs(gdf_pontos.crs)
-        gdf_pontos = gpd.sjoin(
-            gdf_pontos, bairros[["NM_BAIRRO", "geometry"]].rename(columns={"NM_BAIRRO": "NM_BAIRRO_IBGE"}),
-            how="left", predicate="within",
-        ).drop(columns=["index_right"], errors="ignore")
+        bairros_renomeado = bairros.rename(columns={"NM_BAIRRO": "NM_BAIRRO_IBGE"})
+        gdf_pontos = _sjoin_within_com_fallback_proximo(gdf_pontos, bairros_renomeado, ["NM_BAIRRO_IBGE"])
     else:
         # Alguns municipios (ex.: capital de SP) nao possuem "bairro" na
         # malha oficial CD2022 - usa "distrito" (NM_DIST, ja atribuido via
@@ -261,17 +342,24 @@ def total_votos_validos_por_territorio(
     votos_disputa: pd.DataFrame, pontos_com_territorio: pd.DataFrame, nivel: str
 ) -> pd.DataFrame:
     """Soma os votos validos de TODOS os candidatos da disputa por
-    territorio geografico (bairro/distrito), reaproveitando o crosswalk
-    NR_ZONA+NR_LOCAL_VOTACAO -> territorio ja calculado para o
-    candidato-alvo (os mesmos locais de votacao fisicos servem todos os
-    candidatos da disputa). Usado para calcular o percentual real de
-    votos validos do candidato em cada territorio (nao apenas a
-    participacao dentro dos proprios votos do candidato)."""
+    territorio (predio ou secao - ver `nivel`), reaproveitando o crosswalk
+    ja calculado para o candidato-alvo (os mesmos locais de votacao fisicos
+    servem todos os candidatos da disputa). Usado para calcular o
+    percentual real de votos validos do candidato em cada territorio (nao
+    apenas a participacao dentro dos proprios votos do candidato).
+
+    A chave do crosswalk inclui NR_SECAO quando `pontos_com_territorio` tem
+    essa coluna (nivel por secao/urna) - sem isso, o merge com `votos_disputa`
+    (que tambem tem uma linha por secao) faria fan-out: uma secao do
+    predio apareceria somada a todas as outras secoes do MESMO predio."""
     from .vote_filtering import votos_validos
 
-    crosswalk = pontos_com_territorio[["NR_ZONA", "NR_LOCAL_VOTACAO", nivel]].drop_duplicates()
+    chave = ["NR_ZONA", "NR_LOCAL_VOTACAO"]
+    if "NR_SECAO" in pontos_com_territorio.columns:
+        chave = chave + ["NR_SECAO"]
+    crosswalk = pontos_com_territorio[chave + [nivel]].drop_duplicates()
     validos = votos_validos(votos_disputa)
-    com_territorio = validos.merge(crosswalk, on=["NR_ZONA", "NR_LOCAL_VOTACAO"], how="inner")
+    com_territorio = validos.merge(crosswalk, on=chave, how="inner")
     return (
         com_territorio.groupby(nivel, as_index=False)["QT_VOTOS"]
         .sum()

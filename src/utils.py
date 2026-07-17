@@ -102,6 +102,19 @@ def write_cache(namespace: str, key: str, df: pd.DataFrame) -> None:
     df.to_parquet(path, index=False)
 
 
+def crs_metrico_utm(longitude_media: float) -> str:
+    """EPSG SIRGAS 2000 / UTM (zona sul) mais adequado para a longitude
+    media de um conjunto de pontos. O Brasil cobre varias zonas UTM (17S a
+    25S); usar uma zona fixa (ex.: 23S, a de Sao Paulo) para pontos de
+    outras regioes do pais introduz distorcao real de area/distancia - por
+    isso a zona e calculada dinamicamente a partir da longitude, em vez de
+    fixa. Usado em calculos de area (Voronoi) e distancia (fallback de
+    poligono mais proximo no join espacial)."""
+    zona = int((longitude_media + 180) // 6) + 1
+    zona = min(max(zona, 17), 25)  # zonas UTM que cobrem o territorio brasileiro
+    return f"EPSG:{31960 + zona}"
+
+
 def parse_tse_broken_decimal(value: Any, integer_digits: int) -> float | None:
     """Corrige campos numericos do TSE exportados com virgula decimal
     convertida incorretamente em separador de milhar (ex.: latitude
