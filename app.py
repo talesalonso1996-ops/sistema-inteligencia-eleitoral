@@ -475,16 +475,28 @@ elif secao == "Geografia":
             st_folium(mapa_pontos, width=None, height=500, key="mapa_pontos")
 
         with st.container(border=True):
-            st.subheader("Mapa coropletico por distrito")
-            if "NM_DIST" in enriquecido.columns and enriquecido["NM_DIST"].notna().any():
-                setores_gdf = carregar_malha("setores", candidatura.municipio, candidatura.uf)
-                if setores_gdf is not None:
-                    distritos_gdf = setores_gdf.dissolve(by="NM_DIST", as_index=False)
-                    votos_distrito = enriquecido.groupby("NM_DIST", as_index=False)["votos_candidato"].sum()
-                    mapa_choro = maps.mapa_choropleth_territorio(
-                        distritos_gdf, votos_distrito, "NM_DIST", "NM_DIST", "votos_candidato", candidatura.nome_urna
-                    )
-                    st_folium(mapa_choro, width=None, height=500, key="mapa_choro")
+            # Prefere bairro oficial do IBGE (mais granular) - so cai para
+            # distrito (setor censitario) quando a UF/municipio nao tem malha
+            # de bairro publicada pelo IBGE (ex.: capital de SP, Tocantins).
+            usar_bairro = (
+                "NM_BAIRRO_IBGE" in enriquecido.columns and enriquecido["NM_BAIRRO_IBGE"].notna().any()
+            )
+            if usar_bairro:
+                st.subheader("Mapa coropletico por bairro")
+                malha_gdf = carregar_malha("bairros", candidatura.municipio, candidatura.uf)
+                coluna_nivel, coluna_malha = "NM_BAIRRO_IBGE", "NM_BAIRRO"
+            else:
+                st.subheader("Mapa coropletico por distrito (bairro IBGE indisponivel para esta UF/municipio)")
+                malha_gdf = carregar_malha("setores", candidatura.municipio, candidatura.uf)
+                coluna_nivel, coluna_malha = "NM_DIST", "NM_DIST"
+
+            if coluna_nivel in enriquecido.columns and enriquecido[coluna_nivel].notna().any() and malha_gdf is not None:
+                territorios_gdf = malha_gdf.dissolve(by=coluna_malha, as_index=False)
+                votos_territorio = enriquecido.groupby(coluna_nivel, as_index=False)["votos_candidato"].sum()
+                mapa_choro = maps.mapa_choropleth_territorio(
+                    territorios_gdf, votos_territorio, coluna_malha, coluna_nivel, "votos_candidato", candidatura.nome_urna
+                )
+                st_folium(mapa_choro, width=None, height=500, key="mapa_choro")
             else:
                 st.info("Malha de bairro/distrito indisponivel para o mapa coropletico.")
 

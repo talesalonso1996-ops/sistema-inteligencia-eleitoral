@@ -102,7 +102,7 @@ def mapa_voronoi(voronoi_gdf: gpd.GeoDataFrame, coluna_valor: str = "densidade_v
             "weight": 0.5,
             "fillOpacity": 0.7,
         },
-        tooltip=folium.GeoJsonTooltip(fields=["NM_LOCAL_VOTACAO", "votos_candidato", coluna_valor]),
+        tooltip=folium.GeoJsonTooltip(fields=["local_votacao_id", "votos_candidato", coluna_valor]),
     ).add_to(mapa)
     escala.add_to(mapa)
     return mapa
