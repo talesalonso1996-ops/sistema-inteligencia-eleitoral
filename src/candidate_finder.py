@@ -1,16 +1,22 @@
-"""Localizacao automatica de candidaturas a partir do numero eleitoral.
+"""Localizacao automatica de candidaturas a partir do numero eleitoral, em
+QUALQUER municipio/UF do Brasil.
 
 Implementa o fluxo da secao 1 e 2 do briefing: o usuario informa apenas o
 numero do candidato; o sistema cruza duas fontes oficiais do TSE via DuckDB:
 
-- consulta_cand_2024_SP.csv: identidade, partido, coligacao/federacao,
-  situacao da candidatura e resultado final (eleito/nao eleito) - registro,
-  sem votos;
-- votacao_secao_2024_SP.csv (~2,7 GB): votos por secao eleitoral - usado
-  para o total de votos e como base de todas as demais analises.
+- consulta_cand: identidade, partido, coligacao/federacao, situacao da
+  candidatura e resultado final (eleito/nao eleito) - registro nacional,
+  sem votos (arquivo leve, sempre disponivel - nao precisa de bootstrap
+  por UF, ja cobre o Brasil inteiro);
+- votacao_secao: votos por secao eleitoral - usado para o total de votos e
+  como base de todas as demais analises. E' publicado pelo TSE por UF (um
+  arquivo por estado, o maior deles com mais de 1GB) - por isso so e'
+  baixado/convertido (ver uf_data_bootstrap.garantir_dados_uf) para as UFs
+  onde o numero pesquisado realmente aparece no registro, nunca as 27 de
+  uma vez.
 
 Quando mais de uma candidatura e encontrada (mesmo numero em municipios,
-cargos ou turnos diferentes), a decisao de qual usar cabe ao usuario -
+cargos, UFs ou turnos diferentes), a decisao de qual usar cabe ao usuario -
 este modulo apenas retorna as opcoes, nunca escolhe sozinho.
 """
 from __future__ import annotations
@@ -20,6 +26,7 @@ from dataclasses import dataclass
 import duckdb
 import pandas as pd
 
+from .uf_data_bootstrap import caminho_votacao_secao, garantir_dados_uf
 from .utils import cache_key, data_sources, get_logger, read_cache, resolve_path, write_cache
 
 logger = get_logger(__name__)
@@ -138,12 +145,28 @@ def _candidaturas_registro(numero_candidato: int) -> pd.DataFrame:
     return con.execute(sql).fetchdf()
 
 
-def _votos_totais_todas_candidaturas(numero_candidato: int) -> pd.DataFrame:
-    """Retorna, em uma unica varredura do CSV de 2,7 GB, o total de votos e
-    zonas com votos para TODAS as candidaturas do numero informado, agrupado
-    por municipio/cargo/ano/turno. Evita reescanear o arquivo uma vez por
-    municipio encontrado no registro (consulta_cand)."""
-    fonte = _fonte("votacao_secao")
+def _scan_votacao_secao_ufs(ufs: list[str]) -> str:
+    """read_parquet aceita uma lista de arquivos e faz a uniao automatica -
+    varre apenas as UFs realmente encontradas no registro (consulta_cand)
+    para este numero de candidato, nunca o Brasil inteiro."""
+    caminhos = [caminho_votacao_secao(uf).as_posix() for uf in ufs]
+    lista = ", ".join(f"'{c}'" for c in caminhos)
+    return f"read_parquet([{lista}])"
+
+
+def _votos_totais_todas_candidaturas(numero_candidato: int, ufs: list[str]) -> pd.DataFrame:
+    """Retorna, em uma unica varredura dos arquivos de votacao_secao das UFs
+    informadas, o total de votos e zonas com votos para TODAS as
+    candidaturas do numero informado, agrupado por municipio/cargo/ano/
+    turno. `ufs` vem do registro (consulta_cand, nacional) - cada UF e
+    baixada/convertida sob demanda (garantir_dados_uf) antes da varredura."""
+    ufs_disponiveis = [uf for uf in ufs if garantir_dados_uf(uf)]
+    if not ufs_disponiveis:
+        return pd.DataFrame(
+            columns=["codigo_municipio_tse", "cargo", "ano_eleicao", "turno",
+                     "total_votos", "zonas_com_votos"]
+        )
+
     con = _conexao()
     filtro_rotulos = " AND ".join(
         f"NM_VOTAVEL NOT ILIKE '{r}'" for r in _ROTULOS_VOTO_NAO_NOMINAL
@@ -156,20 +179,26 @@ def _votos_totais_todas_candidaturas(numero_candidato: int) -> pd.DataFrame:
             NR_TURNO AS turno,
             SUM(QT_VOTOS) AS total_votos,
             COUNT(DISTINCT NR_ZONA) AS zonas_com_votos
-        FROM {_scan_sql(fonte)}
+        FROM {_scan_votacao_secao_ufs(ufs_disponiveis)}
         WHERE NR_VOTAVEL = {int(numero_candidato)}
           AND {filtro_rotulos}
         GROUP BY 1, 2, 3, 4
     """
-    logger.info("Consultando votos totais (votacao_secao) para numero=%s (1 varredura)", numero_candidato)
+    logger.info(
+        "Consultando votos totais (votacao_secao) para numero=%s nas UFs=%s",
+        numero_candidato, ufs_disponiveis,
+    )
     return con.execute(sql).fetchdf()
 
 
 def buscar_candidaturas(numero_candidato: int) -> list[Candidatura]:
-    """Retorna todas as candidaturas encontradas para o numero informado,
-    cruzando registro (consulta_cand) com votos (votacao_secao). Usa cache
-    em parquet para nao reprocessar o CSV de 2,7 GB a cada consulta."""
-    key = cache_key("candidaturas_v3", numero_candidato)
+    """Retorna todas as candidaturas encontradas para o numero informado em
+    QUALQUER UF do Brasil, cruzando o registro nacional (consulta_cand) com
+    os votos (votacao_secao). O registro e' sempre nacional (arquivo leve,
+    ja disponivel); os votos so sao baixados/convertidos (garantir_dados_uf)
+    para as UFs onde o numero realmente foi registrado - nunca as 27 de
+    uma vez. Usa cache em parquet para nao reprocessar a cada consulta."""
+    key = cache_key("candidaturas_v4", numero_candidato)
     cached = read_cache("candidate_finder", key)
     if cached is not None:
         df = cached
@@ -179,7 +208,8 @@ def buscar_candidaturas(numero_candidato: int) -> list[Candidatura]:
             write_cache("candidate_finder", key, registro)
             return []
 
-        votos = _votos_totais_todas_candidaturas(numero_candidato)
+        ufs = sorted(registro["uf"].dropna().unique().tolist())
+        votos = _votos_totais_todas_candidaturas(numero_candidato, ufs)
         # DS_CARGO vem em caixas diferentes em cada arquivo do TSE
         # ("VEREADOR" no consulta_cand, "Vereador" no votacao_secao):
         # normaliza para a chave de merge sem alterar o cargo exibido.
@@ -260,11 +290,11 @@ def votos_da_candidatura(candidatura: Candidatura) -> pd.DataFrame:
     if cached is not None:
         return cached
 
-    fonte = _fonte("votacao_secao")
+    garantir_dados_uf(candidatura.uf)
     con = _conexao()
     sql = f"""
         SELECT {_COLUNAS_VOTACAO}
-        FROM {_scan_sql(fonte)}
+        FROM read_parquet('{caminho_votacao_secao(candidatura.uf).as_posix()}')
         WHERE NR_VOTAVEL = {candidatura.numero}
           AND CD_MUNICIPIO = {candidatura.codigo_municipio_tse}
           AND DS_CARGO ILIKE '{candidatura.cargo}'
@@ -291,11 +321,11 @@ def votos_da_disputa(candidatura: Candidatura) -> pd.DataFrame:
     if cached is not None:
         return cached
 
-    fonte = _fonte("votacao_secao")
+    garantir_dados_uf(candidatura.uf)
     con = _conexao()
     sql = f"""
         SELECT {_COLUNAS_VOTACAO}
-        FROM {_scan_sql(fonte)}
+        FROM read_parquet('{caminho_votacao_secao(candidatura.uf).as_posix()}')
         WHERE CD_MUNICIPIO = {candidatura.codigo_municipio_tse}
           AND DS_CARGO ILIKE '{candidatura.cargo}'
           AND ANO_ELEICAO = {candidatura.ano_eleicao}

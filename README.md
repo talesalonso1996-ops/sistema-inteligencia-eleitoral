@@ -1,9 +1,10 @@
 # Sistema de Inteligencia Eleitoral
 
 Sistema que, a partir apenas do **numero de um candidato**, localiza a
-candidatura nas Eleicoes Municipais 2024 (SP), cruza dados oficiais do TSE
-e do IBGE (Censo Demografico 2022) e gera analises de resultado, concorrencia,
-territorio, demografia, estatistica e um relatorio executivo (HTML/PDF/Excel).
+candidatura nas Eleicoes Municipais 2024 em **qualquer municipio/UF do
+Brasil**, cruza dados oficiais do TSE e do IBGE (Censo Demografico 2022) e
+gera analises de resultado, concorrencia, territorio, demografia,
+estatistica e um relatorio executivo (HTML/PDF/Excel).
 
 Todos os dados usados sao oficiais e locais - nenhum numero e inventado ou
 estimado sem origem documentada (ver `config/data_sources.yaml`).
@@ -28,24 +29,39 @@ metodologia). Resumo:
 
 | Fonte | Conteudo | Uso |
 |---|---|---|
-| TSE - `consulta_cand_2024_SP.csv` | Identidade, partido, coligacao, situacao, resultado final | Identificacao do candidato |
-| TSE - `votacao_secao_2024_SP.csv` (~2,7 GB) | Votos por candidato/secao | Metricas, ranking, territorio |
-| TSE - `eleitorado_local_votacao_2024.csv` | Coordenadas de cada local de votacao (Brasil) | Mapas, join espacial |
-| TSE - `detalhe_votacao_secao_2024_SP.csv` | Comparecimento/abstencao/brancos/nulos por secao | Indice de performance |
-| IBGE - `SP_setores_CD2022.gpkg` / `SP_bairros_CD2022.gpkg` | Malhas de setor censitario e bairro | Geografia, Voronoi |
-| IBGE - Agregados por Setores Censitarios 2022 (demografia, cor/raca, alfabetizacao, renda do responsavel) | Perfil demografico por setor | Demografia, correlacao, regressao, clustering |
+| TSE - `consulta_cand_2024` (Brasil) | Identidade, partido, coligacao, situacao, resultado final | Identificacao do candidato em qualquer UF |
+| TSE - `votacao_secao_2024_{UF}` (por UF, sob demanda) | Votos por candidato/secao | Metricas, ranking, territorio |
+| TSE - `eleitorado_local_votacao_2024` (Brasil) | Coordenadas de cada local de votacao | Mapas, join espacial |
+| TSE - `detalhe_votacao_secao_2024` (Brasil) | Comparecimento/abstencao/brancos/nulos por secao | Indice de performance |
+| IBGE - malha de setores/bairros CD2022 (por UF, sob demanda) | Malhas de setor censitario e bairro | Geografia, Voronoi |
+| IBGE - Agregados por Setores Censitarios 2022 (Brasil: demografia, cor/raca, alfabetizacao, renda do responsavel) | Perfil demografico por setor | Demografia, correlacao, regressao, clustering |
+| MTE - RAIS Estabelecimentos / Novo CAGED (Brasil, por municipio) | Vinculos formais ativos, saldo de admissoes/desligamentos | Contexto economico do municipio |
 
-O arquivo de 2,7 GB nunca e carregado inteiro em memoria: todas as consultas
-usam DuckDB com projecao de colunas e filtros aplicados durante a leitura.
-Resultados de consultas repetidas sao cacheados em `data/cache/` (parquet).
+Duas categorias de fonte: **nacionais** (registro de candidatos, eleitorado
+por local de votacao, detalhe de secao, agregados censitarios, RAIS/CAGED) -
+arquivos leves (dezenas de MB no total), sempre disponiveis via GitHub
+Release (`src/cloud_data_bootstrap.py`); e **por UF, sob demanda**
+(votacao_secao - o maior arquivo do sistema, >1GB em estados grandes - e a
+malha de setores/bairros) - baixadas e convertidas automaticamente (TSE cdn
++ IBGE geoftp) na primeira busca de um candidato daquele estado (ver
+`src/uf_data_bootstrap.py`), e ficam em cache local para as buscas
+seguintes. Nenhum desses arquivos e carregado inteiro em memoria: todas as
+consultas usam DuckDB com projecao de colunas e filtros aplicados durante a
+leitura. Resultados de consultas repetidas sao cacheados em `data/cache/`
+(parquet).
 
 ### Limitacoes conhecidas
 
-- **Malha geografica**: setor censitario e bairro (IBGE CD2022) so estao
-  configurados para SP (`config/settings.yaml -> geografia.ufs_com_malha_completa`).
-  Para outras UFs o sistema informa a limitacao em vez de simular dados.
+- **Malha geografica por UF**: a malha de setor censitario/bairro (IBGE
+  CD2022) e baixada sob demanda para qualquer UF - mas o IBGE nao publica
+  o produto "bairros" para todas as UFs (ex.: Tocantins). Quando ausente,
+  o sistema usa "distrito" (setor censitario) como nivel alternativo e
+  informa a limitacao, nunca simula um poligono.
 - **Bairro na capital de SP**: a malha oficial de "bairro" do IBGE nao cobre
   o municipio de Sao Paulo (usa "distrito" oficial como nivel alternativo).
+- **Primeira busca em uma UF nova**: baixa e converte a votacao oficial
+  daquele estado (pode levar alguns minutos em estados grandes); buscas
+  seguintes na mesma UF (mesma sessao/container) sao rapidas.
 - **Perfil demografico por local de votacao**: aproximado pelo setor
   censitario onde o local fica fisicamente localizado - nao captura
   eleitores que se deslocam de outros setores.
@@ -64,7 +80,9 @@ Resultados de consultas repetidas sao cacheados em `data/cache/` (parquet).
 ```
 config/            YAML: fontes de dados, configuracoes gerais, pesos do indice
 src/
-  candidate_finder.py     Busca/desambiguacao de candidaturas (DuckDB)
+  candidate_finder.py     Busca/desambiguacao de candidaturas em qualquer UF (DuckDB)
+  uf_data_bootstrap.py    Download/conversao sob demanda por UF (votacao_secao + malha)
+  cloud_data_bootstrap.py Download do pacote nacional (sempre disponivel) via GitHub Release
   tse_downloader.py       Download local-first dos arquivos do TSE
   ibge_downloader.py      Download local-first dos arquivos do IBGE
   data_cleaning.py        Correcao de coordenadas/numeros corrompidos

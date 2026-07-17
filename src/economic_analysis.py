@@ -55,7 +55,7 @@ def resolver_codigo_municipio_rais(candidatura: Candidatura) -> str | None:
     """Deriva o codigo de municipio no formato RAIS/CAGED (IBGE 7 digitos
     sem o digito verificador) a partir da malha de setores censitarios ja
     usada em geographic_analysis (mesma fonte oficial IBGE CD_MUN)."""
-    setores = carregar_malha("setores_censitarios_sp", candidatura.municipio)
+    setores = carregar_malha("setores", candidatura.municipio, candidatura.uf)
     if setores is None or setores.empty or "CD_MUN" not in setores.columns:
         logger.warning(
             "Nao foi possivel resolver o codigo RAIS do municipio '%s' - malha indisponivel.",

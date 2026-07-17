@@ -24,9 +24,21 @@ import geopandas as gpd
 import pandas as pd
 
 from .candidate_finder import Candidatura
-from .utils import cache_key, data_sources, get_logger, read_cache, resolve_path, settings, write_cache
+from .uf_data_bootstrap import caminho_malha, garantir_malha_uf
+from .utils import cache_key, data_sources, get_logger, read_cache, resolve_path, write_cache
 
 logger = get_logger(__name__)
+
+# As 27 UFs do Brasil - usado apenas para validar a entrada (nao ha uma
+# lista de "UFs com malha disponivel": a malha de qualquer UF e baixada sob
+# demanda do IBGE via uf_data_bootstrap; se a UF nao existir ou o IBGE nao
+# tiver publicado a malha, o bootstrap falha graciosamente e o sistema
+# reporta a limitacao, sem simular dados (secao 19 do briefing).
+_UFS_BRASIL = {
+    "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS",
+    "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC",
+    "SP", "SE", "TO",
+}
 
 
 def _normalizar_nome(texto: str) -> str:
@@ -39,10 +51,10 @@ def _normalizar_nome(texto: str) -> str:
 
 
 def uf_tem_malha_completa(uf: str) -> bool:
-    """Verifica se ha malha geografica (setores + bairros) disponivel para
-    a UF - secao 19: informar limitacao em vez de simular dados."""
-    ufs = settings()["geografia"]["ufs_com_malha_completa"]
-    return uf.upper() in [u.upper() for u in ufs]
+    """Verifica se a UF e valida (a malha em si e baixada sob demanda - ver
+    uf_data_bootstrap.garantir_malha_uf - nao ha mais uma lista fixa de UFs
+    com malha "disponivel": qualquer UF real do Brasil pode ser buscada)."""
+    return uf.upper() in _UFS_BRASIL
 
 
 def _caminho(caminho: str) -> str:
@@ -124,35 +136,25 @@ def juntar_votos_com_coordenadas(
     return out
 
 
-def carregar_malha(nome_fonte: str, municipio: str) -> gpd.GeoDataFrame | None:
-    fonte = data_sources()["ibge"][nome_fonte]
-    path = _caminho(fonte["arquivo_local"])
-    from pathlib import Path
+def carregar_malha(tipo: str, municipio: str, uf: str) -> gpd.GeoDataFrame | None:
+    """Carrega a malha de 'setores' ou 'bairros' (CD2022) da UF informada,
+    baixando/convertendo sob demanda (uf_data_bootstrap) na primeira vez que
+    a UF for necessaria, e filtra para o municipio pedido."""
+    garantir_malha_uf(uf)
+    path = str(caminho_malha(tipo, uf))
 
-    if not Path(path).exists():
-        logger.warning("Malha '%s' nao encontrada em %s", nome_fonte, path)
+    if not caminho_malha(tipo, uf).exists():
+        logger.warning("Malha '%s' da UF '%s' nao encontrada em %s", tipo, uf, path)
         return None
     municipio_norm = _normalizar_nome(municipio)
-    eh_parquet = str(path).lower().endswith(".parquet")
-    gdf = None
-    if not eh_parquet:
-        try:
-            # OGR SQL faz comparacao literal (sensivel a acento/caixa); tenta
-            # primeiro pelo nome como esta na malha (Title Case, com acento).
-            gdf = gpd.read_file(path, where=f"UPPER(NM_MUN) = '{municipio_norm}'")
-        except Exception:
-            gdf = None
-    if gdf is None or gdf.empty:
-        # Fallback (ou caminho direto para GeoParquet, que nao suporta o
-        # filtro OGR SQL acima): carrega tudo e filtra em pandas
-        # normalizando acento/caixa dos dois lados (nome do TSE pode vir
-        # grafado de forma diferente).
-        gdf = gpd.read_parquet(path) if eh_parquet else gpd.read_file(path)
-        gdf = gdf[gdf["NM_MUN"].apply(_normalizar_nome) == municipio_norm]
+    # Carrega tudo e filtra em pandas normalizando acento/caixa dos dois
+    # lados (nome do TSE pode vir grafado de forma diferente do IBGE).
+    gdf = gpd.read_parquet(path)
+    gdf = gdf[gdf["NM_MUN"].apply(_normalizar_nome) == municipio_norm]
     if gdf.empty:
         logger.warning(
-            "Nenhum poligono encontrado para o municipio '%s' (normalizado: '%s') em %s",
-            municipio, municipio_norm, nome_fonte,
+            "Nenhum poligono encontrado para o municipio '%s' (normalizado: '%s') em %s/%s",
+            municipio, municipio_norm, uf, tipo,
         )
         return None
     return gdf
@@ -162,9 +164,9 @@ def carregar_fronteira_municipio(candidatura: Candidatura) -> gpd.GeoDataFrame |
     """Retorna uma malha poligonal cobrindo o municipio inteiro (bairros,
     ou setores censitarios como alternativa), usada para recortar o
     diagrama de Voronoi nos limites reais do municipio."""
-    malha = carregar_malha("bairros_sp", candidatura.municipio)
+    malha = carregar_malha("bairros", candidatura.municipio, candidatura.uf)
     if malha is None:
-        malha = carregar_malha("setores_censitarios_sp", candidatura.municipio)
+        malha = carregar_malha("setores", candidatura.municipio, candidatura.uf)
     return malha
 
 
@@ -194,7 +196,7 @@ def atribuir_setor_e_bairro(
         crs="EPSG:4674",
     )
 
-    setores = carregar_malha("setores_censitarios_sp", candidatura.municipio)
+    setores = carregar_malha("setores", candidatura.municipio, candidatura.uf)
     if setores is not None:
         setores = setores.to_crs(gdf_pontos.crs)
         gdf_pontos = gpd.sjoin(
@@ -209,7 +211,7 @@ def atribuir_setor_e_bairro(
         gdf_pontos["CD_SETOR"] = None
         gdf_pontos["NM_DIST"] = None
 
-    bairros = carregar_malha("bairros_sp", candidatura.municipio)
+    bairros = carregar_malha("bairros", candidatura.municipio, candidatura.uf)
     if bairros is not None:
         bairros = bairros.to_crs(gdf_pontos.crs)
         gdf_pontos = gpd.sjoin(

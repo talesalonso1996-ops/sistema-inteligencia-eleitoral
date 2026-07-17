@@ -230,8 +230,10 @@ def _carregar_demografia(
 
 st.title("Sistema de Inteligencia Eleitoral")
 st.caption(
-    "Dados oficiais TSE (votacao por secao + consulta de candidatos, 2024/SP) e "
-    "IBGE (Censo Demografico 2022). Informe apenas o numero do candidato."
+    "Dados oficiais TSE (votacao por secao + consulta de candidatos, Eleicoes "
+    "Municipais 2024, Brasil inteiro) e IBGE (Censo Demografico 2022). Informe "
+    "apenas o numero do candidato - a primeira busca em um estado novo pode "
+    "levar alguns minutos (baixando os dados oficiais daquela UF)."
 )
 
 numero_input = st.text_input("Numero do candidato", placeholder="ex.: 15900")
@@ -244,13 +246,16 @@ if not numero_input.isdigit():
     st.stop()
 
 numero = int(numero_input)
-with st.spinner("Buscando candidaturas no TSE (pode levar ~15s na primeira consulta)..."):
+with st.spinner(
+    "Buscando candidaturas no registro nacional do TSE (pode levar ~15s na "
+    "primeira consulta)..."
+):
     candidaturas = _buscar(numero)
 
 if not candidaturas:
     st.warning(
         f"Nenhuma candidatura encontrada para o numero {numero} nas Eleicoes "
-        "Municipais 2024 em SP. Verifique o numero."
+        "Municipais 2024. Verifique o numero."
     )
     st.stop()
 
@@ -263,7 +268,12 @@ opcoes = {
 escolha = st.selectbox("Selecione a candidatura correta:", list(opcoes.keys()))
 alvo = opcoes[escolha]
 
-with st.spinner("Carregando dados detalhados (primeira vez pode levar ~20-40s)..."):
+with st.spinner(
+    "Carregando dados detalhados... Se esta e a primeira busca de um candidato "
+    f"da UF '{alvo.uf}' nesta sessao, o sistema baixa e converte a votacao "
+    "oficial daquele estado agora (pode levar alguns minutos em estados "
+    "grandes); buscas seguintes na mesma UF sao rapidas."
+):
     candidatura, vc, vd, rd = _carregar_dados_candidatura(
         numero, alvo.codigo_municipio_tse, alvo.cargo, alvo.ano_eleicao, alvo.turno
     )
@@ -467,7 +477,7 @@ elif secao == "Geografia":
         with st.container(border=True):
             st.subheader("Mapa coropletico por distrito")
             if "NM_DIST" in enriquecido.columns and enriquecido["NM_DIST"].notna().any():
-                setores_gdf = carregar_malha("setores_censitarios_sp", candidatura.municipio)
+                setores_gdf = carregar_malha("setores", candidatura.municipio, candidatura.uf)
                 if setores_gdf is not None:
                     distritos_gdf = setores_gdf.dissolve(by="NM_DIST", as_index=False)
                     votos_distrito = enriquecido.groupby("NM_DIST", as_index=False)["votos_candidato"].sum()

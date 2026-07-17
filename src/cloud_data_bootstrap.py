@@ -1,7 +1,13 @@
-"""Garante que o pacote de dados reduzido (Parquet/GeoParquet, ver
-scripts/preparar_dados_cloud.py) esteja disponivel em data/raw/ antes do
-app rodar. Local-first: se os arquivos ja existem (maquina de
+"""Garante que o pacote de dados NACIONAIS reduzido (Parquet, ver
+scripts/preparar_dados_nacionais.py) esteja disponivel em data/raw/ antes
+do app rodar. Local-first: se os arquivos ja existem (maquina de
 desenvolvimento, ou execucao anterior na nuvem), nao baixa nada de novo.
+
+Cobre apenas os arquivos NACIONAIS (registro de candidatos, eleitorado por
+local de votacao, censitarios IBGE, RAIS/CAGED) - a votacao_secao e a
+malha de setores/bairros de cada UF sao baixadas sob demanda por
+src/uf_data_bootstrap.py na primeira busca de um candidato daquele estado,
+nao aqui (pre-carregar as 27 UFs de uma vez nao caberia neste pacote).
 
 Usado especificamente para o deploy em ambientes efemeros (Streamlit
 Community Cloud), onde data/raw/ nao e versionado no git (arquivos

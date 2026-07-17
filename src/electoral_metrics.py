@@ -123,7 +123,7 @@ def _carregar_detalhe_secao() -> pd.DataFrame | None:
     """Carrega comparecimento/abstencao/brancos/nulos por secao (arquivo
     detalhe_votacao_secao). Retorna None se o arquivo nao estiver disponivel
     (secao 17: sistema deve seguir sem essa informacao, nao inventar)."""
-    fonte = data_sources()["tse"].get("detalhe_votacao_secao_sp")
+    fonte = data_sources()["tse"].get("detalhe_votacao_secao")
     if fonte is None:
         return None
     caminho = fonte["arquivo_local"]

@@ -1,18 +1,28 @@
 from src.candidate_finder import buscar_candidaturas, eleicao_mais_recente
+from src.geographic_analysis import _UFS_BRASIL
 
 
 def test_buscar_candidaturas_encontra_multiplas_para_numero_ambiguo():
     candidaturas = buscar_candidaturas(15900)
-    assert len(candidaturas) > 1, "numero 15900 deve aparecer em varios municipios de SP"
+    assert len(candidaturas) > 1, "numero 15900 deve aparecer em varios municipios/UFs"
     municipios = {c.municipio for c in candidaturas}
     assert "SÃO PAULO" in municipios
+
+
+def test_candidaturas_cobrem_mais_de_uma_uf():
+    """O numero 15900 e' um numero de vereador comum - deve aparecer em
+    municipios de VARIAS UFs, nao so SP (busca e' nacional)."""
+    candidaturas = buscar_candidaturas(15900)
+    ufs = {c.uf for c in candidaturas}
+    assert len(ufs) > 1
+    assert "SP" in ufs
 
 
 def test_candidaturas_tem_campos_obrigatorios_preenchidos():
     candidaturas = buscar_candidaturas(15900)
     for c in candidaturas:
         assert c.numero == 15900
-        assert c.uf == "SP"
+        assert c.uf in _UFS_BRASIL
         assert c.ano_eleicao == 2024
         assert c.total_votos >= 0
         assert c.partido_sigla

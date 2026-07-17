@@ -29,10 +29,12 @@ logging:
   arquivo: "outputs/logs/sistema.log"
 
 geografia:
-  # UFs com malha geografica local (setores censitarios + bairros CD2022)
-  # disponivel em data/geographic. Fora desta lista, o sistema informa a
-  # limitacao em vez de simular dados (secao 19 do briefing).
-  ufs_com_malha_completa:
-    - "SP"
-  crs_metros: "EPSG:31983"   # SIRGAS 2000 / UTM 23S, usado para Voronoi/area
+  # Malha geografica (setores censitarios + bairros CD2022) de qualquer UF
+  # e baixada sob demanda do IBGE (ver src/uf_data_bootstrap.py) na primeira
+  # busca de um candidato daquele estado - nao ha mais uma lista fixa de
+  # UFs "habilitadas". O CRS metrico usado no calculo de area (Voronoi) e
+  # a zona UTM SIRGAS 2000 correspondente, calculada dinamicamente a partir
+  # da longitude (ver src/voronoi_analysis.py:_crs_metrico_utm) - o Brasil
+  # cobre varias zonas UTM (17S a 25S), entao uma zona fixa introduziria
+  # distorcao de area fora da regiao daquela zona.
   crs_geografico: "EPSG:4674"  # SIRGAS 2000 lat/long
