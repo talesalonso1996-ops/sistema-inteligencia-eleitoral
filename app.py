@@ -511,16 +511,20 @@ elif secao == "Geografia":
         with st.container(border=True):
             # Prefere bairro oficial do IBGE (mais granular) - so cai para
             # distrito (setor censitario) quando a UF/municipio nao tem malha
-            # de bairro publicada pelo IBGE (ex.: capital de SP, Tocantins).
-            usar_bairro = (
-                "NM_BAIRRO_IBGE" in enriquecido.columns and enriquecido["NM_BAIRRO_IBGE"].notna().any()
-            )
-            if usar_bairro:
+            # de bairro publicada pelo IBGE (ex.: capital de SP, Tocantins,
+            # Goiania). O mapa coropletico precisa de POLIGONO real - o
+            # bairro pode ter sido preenchido via CEP (ViaCEP, sem
+            # poligono associado - ver geographic_analysis.py), entao a
+            # escolha aqui depende de a malha de bairro EXISTIR
+            # (carregar_malha != None), nao apenas de NM_BAIRRO_IBGE ter
+            # algum valor preenchido.
+            malha_bairros = carregar_malha("bairros", candidatura.municipio, candidatura.uf)
+            if malha_bairros is not None:
                 st.subheader("Mapa coropletico por bairro")
-                malha_gdf = carregar_malha("bairros", candidatura.municipio, candidatura.uf)
+                malha_gdf = malha_bairros
                 coluna_nivel, coluna_malha = "NM_BAIRRO_IBGE", "NM_BAIRRO"
             else:
-                st.subheader("Mapa coropletico por distrito (bairro IBGE indisponivel para esta UF/municipio)")
+                st.subheader("Mapa coropletico por distrito (malha de bairro sem poligonos para esta UF/municipio)")
                 malha_gdf = carregar_malha("setores", candidatura.municipio, candidatura.uf)
                 coluna_nivel, coluna_malha = "NM_DIST", "NM_DIST"
 
