@@ -6,8 +6,26 @@ NM_VOTAVEL = nome do PARTIDO e NR_VOTAVEL = numero do partido (nao de um
 candidato). Se nao for excluido antes de agrupar por NR_VOTAVEL, ele
 aparece como uma "candidatura fantasma" de votacao alta. E valido para o
 total de votos validos e para o total do partido, mas nao para o ranking
-individual de candidatos - por isso a exclusao usa o conjunto de numeros
-de partido do registro (consulta_cand), nao um rotulo textual fixo.
+individual de candidatos.
+
+CORRECAO (bug real encontrado em producao): a exclusao NAO pode se basear
+so em NR_VOTAVEL bater com um numero de partido do registro - em disputas
+MAJORITARIAS (Prefeito, Governador, Senador, Presidente), a convencao do
+TSE e o numero de urna do candidato SER o proprio numero do partido (ex.:
+Ricardo Nunes = numero 15 = MDB, numero do partido 15). Usar so o numero
+removia TODOS os votos de qualquer candidato majoritario cujo numero
+coincidisse com o do proprio partido, deixando o ranking vazio e
+derrubando resultado_geral()/ranking_disputa() com dados reais (caso
+verificado: Prefeito de Sao Paulo 2024, candidato 15). A distincao correta
+usa TAMBEM o NM_VOTAVEL: um voto de legenda tem NM_VOTAVEL = nome do
+PARTIDO (ex.: "Movimento Democratico Brasileiro"); um voto nominal, mesmo
+quando NR_VOTAVEL coincide com um numero de partido, tem NM_VOTAVEL = nome
+do CANDIDATO (ex.: "RICARDO LUIS REIS NUNES") - nunca os dois ao mesmo
+tempo. Verificado com dados reais: para Vereador (onde a exclusao ja
+funcionava), 100% das linhas com NR_VOTAVEL=numero_partido tambem tem
+NM_VOTAVEL=nome_partido - a correcao abaixo preserva exatamente o mesmo
+resultado para cargos proporcionais, so deixa de remover erroneamente
+votos reais em cargos majoritarios.
 """
 from __future__ import annotations
 
@@ -23,20 +41,24 @@ def votos_validos(votos_disputa: pd.DataFrame) -> pd.DataFrame:
     return votos_disputa[mask].copy()
 
 
+def votos_legenda(votos_disputa: pd.DataFrame, registro_disputa: pd.DataFrame) -> pd.DataFrame:
+    """Apenas os votos de legenda: NR_VOTAVEL bate com um numero de
+    partido do registro E NM_VOTAVEL e o nome desse partido (nao o nome de
+    um candidato) - ver nota de correcao no docstring do modulo."""
+    numeros_partido = set(registro_disputa["numero_partido"].dropna().unique())
+    partidos_nomes = set(registro_disputa["partido_nome"].dropna().str.upper().unique())
+    e_numero_de_partido = votos_disputa["NR_VOTAVEL"].isin(numeros_partido)
+    e_nome_de_partido = votos_disputa["NM_VOTAVEL"].str.upper().isin(partidos_nomes)
+    return votos_disputa[e_numero_de_partido & e_nome_de_partido].copy()
+
+
 def votos_nominais(votos_disputa: pd.DataFrame, registro_disputa: pd.DataFrame) -> pd.DataFrame:
     """Remove brancos/nulos/voto de legenda: mantem apenas votos em
     candidatos individuais. Uso obrigatorio antes de agrupar por
     NR_VOTAVEL para ranking/colocacao."""
     validos = votos_validos(votos_disputa)
-    numeros_partido = set(registro_disputa["numero_partido"].dropna().unique())
-    mask = ~validos["NR_VOTAVEL"].isin(numeros_partido)
-    return validos[mask].copy()
-
-
-def votos_legenda(votos_disputa: pd.DataFrame, registro_disputa: pd.DataFrame) -> pd.DataFrame:
-    """Apenas os votos de legenda (complementar a `votos_nominais`)."""
-    numeros_partido = set(registro_disputa["numero_partido"].dropna().unique())
-    return votos_disputa[votos_disputa["NR_VOTAVEL"].isin(numeros_partido)].copy()
+    legenda = votos_legenda(validos, registro_disputa)
+    return validos.drop(legenda.index)
 
 
 def secao_composta(votos: pd.DataFrame) -> pd.Series:
