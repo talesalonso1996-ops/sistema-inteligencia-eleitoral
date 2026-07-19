@@ -3,7 +3,7 @@
 venv/
 
 # Dados brutos/derivados (TSE/IBGE) - grandes demais para o Git, baixados
-# sob demanda pelos downloaders (ver src/tse_downloader.py, ibge_downloader.py)
+# sob demanda (ver src/cloud_data_bootstrap.py, src/uf_data_bootstrap.py)
 data/raw/
 data/cache/
 data/geographic/

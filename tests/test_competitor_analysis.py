@@ -1,6 +1,19 @@
 import pandas as pd
 
 from src.competitor_analysis import delta_vs_rivais, matriz_candidato_territorio, rivais_por_similaridade_eleitorado
+from src.vote_filtering import votos_nominais, votos_validos
+
+
+def test_ranking_disputa_percentual_nunca_excede_100(ranking_sp):
+    """pct_votos_validos e uma fatia do total de votos validos da propria
+    disputa - nunca pode passar de 100% (bug real ja corrigido: cache sem
+    UF/versao podia servir votos de uma disputa diferente do registro)."""
+    assert (ranking_sp["pct_votos_validos"] <= 100).all()
+
+
+def test_soma_nominais_menor_ou_igual_total_validos(dados_disputa):
+    _, vd, rd = dados_disputa
+    assert votos_nominais(vd, rd)["QT_VOTOS"].sum() <= votos_validos(vd)["QT_VOTOS"].sum()
 
 
 def test_rivais_por_similaridade_correlacao_em_intervalo_valido(candidatura_sp, dados_disputa):

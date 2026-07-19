@@ -176,6 +176,73 @@ def variaveis_renda(setores_de_interesse: set[str]) -> pd.DataFrame:
     return resultado
 
 
+def variaveis_parentesco(setores_de_interesse: set[str]) -> pd.DataFrame:
+    """% de domicilios com responsavel do sexo feminino, por setor (fonte:
+    Agregados_por_setores_parentesco_BR, V01042 total de responsaveis pelo
+    domicilio / V01063 responsaveis do sexo feminino)."""
+    key = cache_key("parentesco", tuple(sorted(setores_de_interesse)))
+    cached = read_cache("demographic_analysis", key)
+    if cached is not None:
+        return cached
+
+    fonte = data_sources()["ibge"]["agregados_parentesco"]["arquivo_local"]
+    colunas = ["CD_SETOR", "V01042", "V01062", "V01063"]
+    df = _ler_zip_csv(fonte, colunas, {"CD_SETOR": str})
+    df = df[df["CD_SETOR"].isin(setores_de_interesse)]
+    df = _to_numeric(df, colunas[1:])
+
+    df["pct_domicilios_chefia_feminina"] = (100 * df["V01063"] / df["V01042"]).round(2)
+
+    resultado = df[["CD_SETOR", "pct_domicilios_chefia_feminina"]]
+    write_cache("demographic_analysis", key, resultado)
+    return resultado
+
+
+def variaveis_domicilio(setores_de_interesse: set[str]) -> pd.DataFrame:
+    """% de domicilios com agua encanada, esgotamento sanitario adequado e
+    coleta de lixo, por setor (fonte:
+    Agregados_por_setores_caracteristicas_domicilio2_BR - variaveis com
+    denominador e descricao inequivocos no dicionario oficial do IBGE,
+    diferente de caracteristicas_domicilio1, ja excluido em
+    config/data_sources.yaml por falta de identificacao clara):
+
+    - agua encanada: V00199 (ate dentro de casa) + V00200 (so ate o
+      terreno) vs V00201 (nao chega encanada).
+    - esgoto adequado: V00309 (rede geral/pluvial) + V00310 (fossa septica
+      ligada a rede) vs total de destinacoes (V00309 a V00316, incluindo
+      V00311 fossa nao ligada, V00312 fossa rudimentar, V00313 vala, V00314
+      rio/lago/corrego/mar, V00315 outra forma, V00316 sem banheiro/
+      sanitario).
+    - coleta de lixo: V00397 (coletado por servico de limpeza) + V00398
+      (deposito em cacamba) vs total de destinacoes (V00397 a V00402)."""
+    key = cache_key("domicilio2", tuple(sorted(setores_de_interesse)))
+    cached = read_cache("demographic_analysis", key)
+    if cached is not None:
+        return cached
+
+    fonte = data_sources()["ibge"]["agregados_domicilio2"]["arquivo_local"]
+    colunas_agua = ["V00199", "V00200", "V00201"]
+    colunas_esgoto = ["V00309", "V00310", "V00311", "V00312", "V00313", "V00314", "V00315", "V00316"]
+    colunas_lixo = ["V00397", "V00398", "V00399", "V00400", "V00401", "V00402"]
+    colunas = ["setor"] + colunas_agua + colunas_esgoto + colunas_lixo
+    df = _ler_zip_csv(fonte, colunas, {"setor": str}).rename(columns={"setor": "CD_SETOR"})
+    df = df[df["CD_SETOR"].isin(setores_de_interesse)]
+    df = _to_numeric(df, colunas_agua + colunas_esgoto + colunas_lixo)
+
+    total_agua = df[colunas_agua].sum(axis=1)
+    df["pct_agua_encanada"] = (100 * (df["V00199"] + df["V00200"]) / total_agua).round(2)
+
+    total_esgoto = df[colunas_esgoto].sum(axis=1)
+    df["pct_esgoto_adequado"] = (100 * (df["V00309"] + df["V00310"]) / total_esgoto).round(2)
+
+    total_lixo = df[colunas_lixo].sum(axis=1)
+    df["pct_coleta_lixo"] = (100 * (df["V00397"] + df["V00398"]) / total_lixo).round(2)
+
+    resultado = df[["CD_SETOR", "pct_agua_encanada", "pct_esgoto_adequado", "pct_coleta_lixo"]]
+    write_cache("demographic_analysis", key, resultado)
+    return resultado
+
+
 def perfil_demografico_por_setor(setores_de_interesse: set[str]) -> pd.DataFrame:
     """Junta todas as variaveis demograficas verificadas em uma unica
     tabela por setor censitario."""
@@ -187,11 +254,15 @@ def perfil_demografico_por_setor(setores_de_interesse: set[str]) -> pd.DataFrame
     cor_raca = variaveis_cor_raca(setores_de_interesse)
     alfabetizacao = variaveis_alfabetizacao(setores_de_interesse)
     renda = variaveis_renda(setores_de_interesse)
+    parentesco = variaveis_parentesco(setores_de_interesse)
+    domicilio = variaveis_domicilio(setores_de_interesse)
 
     perfil = (
         demografia.merge(cor_raca, on="CD_SETOR", how="outer")
         .merge(alfabetizacao, on="CD_SETOR", how="outer")
         .merge(renda, on="CD_SETOR", how="outer")
+        .merge(parentesco, on="CD_SETOR", how="outer")
+        .merge(domicilio, on="CD_SETOR", how="outer")
     )
     return perfil
 
@@ -207,6 +278,8 @@ def perfil_demografico_do_territorio(
         "pct_masculino", "pct_feminino", "idade_media_aprox", "pct_branca",
         "pct_preta", "pct_parda", "pct_preta_parda", "pct_amarela", "pct_indigena",
         "pct_alfabetizado_15mais", "renda_media_responsavel",
+        "pct_domicilios_chefia_feminina", "pct_agua_encanada",
+        "pct_esgoto_adequado", "pct_coleta_lixo",
     ]
     variaveis = [v for v in variaveis if v in base.columns]
 

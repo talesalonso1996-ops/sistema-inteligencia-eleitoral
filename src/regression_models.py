@@ -44,6 +44,29 @@ class ResultadoRegressao:
             )
 
 
+def _remover_variaveis_sem_variancia(
+    dados: pd.DataFrame, variaveis_validas: list[str], nome_analise: str,
+) -> tuple[list[str], list[DataIssue]]:
+    """Remove variaveis com variancia zero (mesmo valor em todas as
+    observacoes) na amostra apos o dropna - situacao real e frequente
+    (ex.: municipio 100% urbanizado onde todo territorio tem 100% de
+    agua encanada). Uma coluna constante, somada ao intercepto da
+    regressao, e uma combinacao linear exata e quebra o ajuste (matriz
+    singular) - nao e um erro de dado, e uma propriedade da amostra."""
+    sem_variancia = [v for v in variaveis_validas if dados[v].nunique(dropna=True) <= 1]
+    if not sem_variancia:
+        return variaveis_validas, []
+    issue = DataIssue(
+        etapa=nome_analise,
+        severidade="aviso",
+        mensagem=(
+            f"Variavel(is) sem variacao nesta amostra (mesmo valor em todos os "
+            f"territorios) excluida(s) da regressao: {', '.join(sem_variancia)}."
+        ),
+    )
+    return [v for v in variaveis_validas if v not in sem_variancia], [issue]
+
+
 def regressao_linear_votos(
     df: pd.DataFrame, coluna_alvo: str, variaveis: list[str], coluna_cluster: str | None = None,
 ) -> tuple[ResultadoRegressao | None, list[DataIssue]]:
@@ -62,10 +85,14 @@ def regressao_linear_votos(
     colunas = [coluna_alvo] + variaveis_validas + ([coluna_cluster] if tem_cluster else [])
     dados = df[colunas].dropna(subset=[coluna_alvo] + variaveis_validas)
 
+    variaveis_validas, issues_variancia = _remover_variaveis_sem_variancia(
+        dados, variaveis_validas, "regressao_linear_votos"
+    )
+
     minimo = _AMOSTRA_MINIMA_POR_VARIAVEL * max(len(variaveis_validas), 1)
     issues = validar_amostra_minima(len(dados), minimo, "regressao_linear_votos")
     if issues or not variaveis_validas:
-        return None, issues
+        return None, issues_variancia + issues
 
     x = sm.add_constant(dados[variaveis_validas])
     y = dados[coluna_alvo]
@@ -94,7 +121,7 @@ def regressao_linear_votos(
         variaveis_utilizadas=variaveis_validas,
         erro_padrao_cluster=tem_cluster,
     )
-    return resultado, []
+    return resultado, issues_variancia
 
 
 @dataclass
@@ -156,10 +183,14 @@ def regressao_logistica_bom_desempenho(
     colunas = [coluna_pct_votos] + variaveis_validas + ([coluna_cluster] if tem_cluster else [])
     dados = df[colunas].dropna(subset=[coluna_pct_votos] + variaveis_validas)
 
+    variaveis_validas, issues_variancia = _remover_variaveis_sem_variancia(
+        dados, variaveis_validas, "regressao_logistica_bom_desempenho"
+    )
+
     minimo = _AMOSTRA_MINIMA_POR_VARIAVEL * max(len(variaveis_validas), 1)
     issues = validar_amostra_minima(len(dados), minimo, "regressao_logistica_bom_desempenho")
     if issues or not variaveis_validas:
-        return None, issues
+        return None, issues_variancia + issues
 
     limiar_usado = limiar if limiar is not None else float(dados[coluna_pct_votos].median())
     alvo = (dados[coluna_pct_votos] >= limiar_usado).astype(int)
@@ -185,7 +216,7 @@ def regressao_logistica_bom_desempenho(
             modelo = sm.Logit(alvo, x).fit(disp=0)
     except Exception as exc:  # separacao perfeita ou nao-convergencia
         logger.warning("Regressao logistica nao convergiu: %s", exc)
-        return None, [
+        return None, issues_variancia + [
             DataIssue(
                 etapa="regressao_logistica_bom_desempenho",
                 severidade="erro",
@@ -244,4 +275,4 @@ def regressao_logistica_bom_desempenho(
         variaveis_utilizadas=variaveis_validas,
         erro_padrao_cluster=tem_cluster,
     )
-    return resultado, []
+    return resultado, issues_variancia

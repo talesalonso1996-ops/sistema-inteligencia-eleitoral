@@ -74,6 +74,32 @@ def test_regressao_linear_cluster_ativa_erro_padrao_robusto(base_territorio_sp):
     assert modelo.erro_padrao_cluster is True
 
 
+def test_regressao_logistica_exclui_variavel_sem_variancia(base_territorio_sp):
+    """Uma variavel constante (mesmo valor em todos os territorios, ex.:
+    municipio 100% urbanizado) somada ao intercepto causa colinearidade
+    perfeita (matriz singular) - deve ser excluida automaticamente, com
+    aviso, em vez de derrubar a regressao inteira."""
+    base = base_territorio_sp.copy()
+    base["pct_constante"] = 100.0
+    variaveis = VARIAVEIS_DEMOGRAFICAS + ["pct_constante"]
+    modelo, issues = regressao_logistica_bom_desempenho(
+        base, "pct_votos_validos_territorio", variaveis
+    )
+    assert modelo is not None, f"modelo nao ajustado: {issues}"
+    assert "pct_constante" not in modelo.variaveis_utilizadas
+    assert any("pct_constante" in i.mensagem for i in issues)
+
+
+def test_regressao_linear_exclui_variavel_sem_variancia(base_territorio_sp):
+    base = base_territorio_sp.copy()
+    base["pct_constante"] = 100.0
+    variaveis = VARIAVEIS_DEMOGRAFICAS + ["pct_constante"]
+    modelo, issues = regressao_linear_votos(base, "votos_candidato", variaveis)
+    assert modelo is not None, f"modelo nao ajustado: {issues}"
+    assert "pct_constante" not in modelo.variaveis_utilizadas
+    assert any("pct_constante" in i.mensagem for i in issues)
+
+
 def test_regressao_logistica_amostra_insuficiente_retorna_none():
     import pandas as pd
 

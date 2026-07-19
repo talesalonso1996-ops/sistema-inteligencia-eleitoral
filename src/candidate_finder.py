@@ -279,7 +279,8 @@ def votos_da_candidatura(candidatura: Candidatura) -> pd.DataFrame:
     """Retorna o detalhamento por zona/secao/local de votacao para a
     candidatura selecionada - base para todas as demais analises."""
     key = cache_key(
-        "votos_candidatura",
+        "votos_candidatura_v2",
+        candidatura.uf,
         candidatura.numero,
         candidatura.codigo_municipio_tse,
         candidatura.cargo,
@@ -311,7 +312,8 @@ def votos_da_disputa(candidatura: Candidatura) -> pd.DataFrame:
     disputaram o mesmo cargo, no mesmo municipio, ano e turno - base
     para a analise de concorrentes (secao 7)."""
     key = cache_key(
-        "votos_disputa",
+        "votos_disputa_v2",
+        candidatura.uf,
         candidatura.codigo_municipio_tse,
         candidatura.cargo,
         candidatura.ano_eleicao,
@@ -363,5 +365,11 @@ def registro_candidatos_disputa(candidatura: Candidatura) -> pd.DataFrame:
           AND ANO_ELEICAO = {candidatura.ano_eleicao}
           AND NR_TURNO = {candidatura.turno}
           AND DS_ELEICAO ILIKE '%Eleições Municipais%'
+          AND DS_SIT_TOT_TURNO != '#NULO'
     """
+    # Mesmo filtro (e mesmo motivo) de _candidaturas_registro: sem isso, uma
+    # candidatura substituida/anulada aparece com 2 linhas de registro para
+    # o mesmo numero (a anulada + a substituta), duplicando a linha desse
+    # candidato em ranking_disputa/ranking_partidos (merge how="left" contra
+    # este registro) - caso real verificado: Pitangueiras/SP, numero 30000.
     return con.execute(sql).fetchdf()

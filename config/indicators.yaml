@@ -30,12 +30,28 @@ clustering:
   k_min: 2
   k_max: 8
   k_fixo: 10  # segmentacao padrao exibida no produto (secao "Estatistica Avancada")
+  # ATENCAO: pct_branca, pct_preta, pct_parda, pct_amarela, pct_indigena e
+  # pct_preta_parda (=pct_preta+pct_parda) sao fatias complementares da
+  # MESMA populacao (somam ~100%) - incluir pct_branca junto com
+  # pct_preta_parda + pct_amarela + pct_indigena aqui causaria colinearidade
+  # perfeita (a soma das 4 e sempre ~100%, uma combinacao linear exata das
+  # outras 3 mais o intercepto), quebrando a regressao (matriz singular).
+  # Por isso pct_branca fica de fora da lista (categoria de referencia
+  # implicita, mesma logica de "category left out" em variaveis dummy) -
+  # continua calculada e disponivel em perfil_demografico_do_territorio,
+  # so nao entra no conjunto padrao de regressao/clustering/Maslow.
   variaveis_demograficas:
     - "renda_media_responsavel"
     - "pct_alfabetizado_15mais"
     - "pct_preta_parda"
     - "idade_media_aprox"
     - "pct_masculino"
+    - "pct_amarela"
+    - "pct_indigena"
+    - "pct_domicilios_chefia_feminina"
+    - "pct_agua_encanada"
+    - "pct_esgoto_adequado"
+    - "pct_coleta_lixo"
 
 # Abordagem de Maslow (secao "Abordagem de Maslow" do produto).
 #
@@ -70,6 +86,22 @@ piramide_maslow:
             socioeconomico (SES) classico para capacidade de suprir
             necessidades materiais basicas - indicador padrao de privacao/
             seguranca material em ciencias sociais.
+        - nome: "pct_agua_encanada"
+          rationale: >
+            Acesso a agua encanada dentro do domicilio e uma necessidade
+            fisiologica basica na propria formulacao original de Maslow -
+            indicador DIRETO de infraestrutura sanitaria do territorio, nao
+            um proxy socioeconomico indireto como renda.
+        - nome: "pct_esgoto_adequado"
+          rationale: >
+            Esgotamento sanitario adequado (rede geral/pluvial ou fossa
+            septica ligada a rede) e infraestrutura basica de saneamento -
+            mesma logica de necessidade fisiologica direta que agua
+            encanada.
+        - nome: "pct_coleta_lixo"
+          rationale: >
+            Coleta regular de lixo e infraestrutura sanitaria basica do
+            territorio - mesma logica de necessidade fisiologica direta.
 
     seguranca:
       label: "Seguranca"
@@ -135,6 +167,24 @@ piramide_maslow:
         Variavel de controle demografico (composicao por sexo), sem
         correspondencia teorica direta com nenhum nivel da piramide de
         Maslow.
+    - nome: "pct_amarela"
+      motivo: >
+        Mesmo motivo de pct_branca: sem rationale de literatura especifico
+        documentado para esta categoria racial.
+    - nome: "pct_indigena"
+      motivo: >
+        Mesmo motivo de pct_branca: a literatura de vulnerabilidade racial
+        usada para pct_preta_parda (Atlas da Violencia/IPEA) nao cobre
+        especificamente populacao indigena - existe literatura propria
+        sobre vulnerabilidade de povos indigenas, mas nao foi verificada/
+        documentada aqui com o mesmo rigor, entao a variavel fica sem
+        mapeamento em vez de usar uma citacao nao conferida.
+    - nome: "pct_domicilios_chefia_feminina"
+      motivo: >
+        Variavel de estrutura familiar (% domicilios com responsavel
+        mulher) sem rationale de literatura especifico documentado e
+        conferido para um nivel da piramide de Maslow - mantida em
+        clustering/regressao sem mapeamento, por ora.
 
   aviso_metodologico: >
     A Piramide de Maslow e uma teoria psicologica sobre motivacao

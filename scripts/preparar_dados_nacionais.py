@@ -106,6 +106,16 @@ _IBGE_FONTES = {
         "renda_setores_BR.parquet",
         ["CD_SETOR", "V06001", "V06002", "V06004"],
     ),
+    "Agregados_por_setores_parentesco_BR.zip": (
+        "parentesco_setores_BR.parquet",
+        ["CD_SETOR", "V01042", "V01062", "V01063"],
+    ),
+    "Agregados_por_setores_caracteristicas_domicilio2_BR_20250417.zip": (
+        "domicilio2_setores_BR.parquet",
+        ["setor", "V00199", "V00200", "V00201",
+         "V00309", "V00310", "V00311", "V00312", "V00313", "V00314", "V00315", "V00316",
+         "V00397", "V00398", "V00399", "V00400", "V00401", "V00402"],
+    ),
 }
 
 

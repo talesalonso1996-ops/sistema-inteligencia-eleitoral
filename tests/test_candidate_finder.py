@@ -1,4 +1,4 @@
-from src.candidate_finder import buscar_candidaturas, eleicao_mais_recente
+from src.candidate_finder import buscar_candidaturas, eleicao_mais_recente, registro_candidatos_disputa
 from src.geographic_analysis import _UFS_BRASIL
 
 
@@ -39,3 +39,15 @@ def test_eleicao_mais_recente_filtra_por_ano_e_turno_maximos():
 def test_numero_inexistente_retorna_lista_vazia():
     candidaturas = buscar_candidaturas(999999)
     assert candidaturas == []
+
+
+def test_registro_candidatos_disputa_exclui_situacao_nula():
+    """Caso real verificado: Pitangueiras/SP, numero 30000, vereador - o
+    registro (consulta_cand) mantinha 2 linhas para esse numero (a
+    candidatura anulada '#NULO' + a substituta que de fato concorreu).
+    Sem filtrar '#NULO', essa candidatura aparecia duplicada na tabela de
+    Concorrencia (merge how="left" em ranking_disputa)."""
+    candidatura = next(c for c in buscar_candidaturas(30000) if c.municipio == "PITANGUEIRAS")
+    registro = registro_candidatos_disputa(candidatura)
+    assert not (registro["resultado_final"] == "#NULO").any()
+    assert (registro["numero"] == 30000).sum() == 1

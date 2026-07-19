@@ -45,6 +45,29 @@ def test_raca_mapeada_em_seguranca_com_rationale():
     assert variaveis_seguranca["pct_preta_parda"]["rationale"].strip()
 
 
+def test_variaveis_raciais_sem_rationale_ficam_sem_correspondencia():
+    """pct_amarela/pct_indigena nao tem citacao de literatura verificada
+    com o mesmo rigor de pct_preta_parda (Atlas da Violencia/IPEA) - ficam
+    documentadas como sem correspondencia teorica, nunca mapeadas em
+    Seguranca so para "completar" a categoria racial."""
+    cfg = indicators_config()["piramide_maslow"]
+    sem_corresp = {v["nome"] for v in cfg["variaveis_sem_correspondencia_teorica"]}
+    assert {"pct_amarela", "pct_indigena"}.issubset(sem_corresp)
+    seguranca_vars = {v["nome"] for v in cfg["tiers"]["seguranca"]["variaveis"]}
+    assert not seguranca_vars & {"pct_amarela", "pct_indigena"}
+
+
+def test_pct_branca_fica_fora_do_conjunto_padrao_por_colinearidade():
+    """pct_branca + pct_amarela + pct_indigena + pct_preta_parda sao fatias
+    complementares da mesma populacao (somam ~100%) - incluir as 4 junto
+    com o intercepto da regressao causa colinearidade perfeita (matriz
+    singular). pct_branca fica de fora como categoria de referencia
+    implicita (mesma logica de "category left out" em variaveis dummy)."""
+    variaveis = indicators_config()["clustering"]["variaveis_demograficas"]
+    assert "pct_branca" not in variaveis
+    assert {"pct_amarela", "pct_indigena", "pct_preta_parda"}.issubset(set(variaveis))
+
+
 def test_gerar_analise_maslow_sem_nenhum_modelo():
     resultado = gerar_analise_maslow(None, None, None)
     assert resultado.fonte_efeito == "indisponivel"

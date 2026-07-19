@@ -71,5 +71,7 @@ def base_territorio_sp(candidatura_sp, dados_disputa):
 
 VARIAVEIS_DEMOGRAFICAS = [
     "renda_media_responsavel", "pct_alfabetizado_15mais", "pct_preta_parda",
-    "idade_media_aprox", "pct_masculino",
+    "idade_media_aprox", "pct_masculino", "pct_amarela", "pct_indigena",
+    "pct_domicilios_chefia_feminina", "pct_agua_encanada", "pct_esgoto_adequado",
+    "pct_coleta_lixo",
 ]
